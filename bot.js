@@ -272,9 +272,9 @@ function salvarGist(dados) {
 // ─────────────────────────────────────────────────────────────
 async function iniciarFormulario(message) {
   const userId = message.author.id;
-  if (sessoes.has(userId)) return message.reply('⚠️ Você já tem uma sessão aberta. Digite `cancelar` para sair.');
+  if (sessoes.has(userId)) return message.reply('⚠️ *Mortal, um decreto já está sendo redigido! Proclama `cancelar` para encerrar o ritual atual antes de iniciar outro.*');
   sessoes.set(userId, { etapa: 'versao', dados: {} });
-  await message.reply('🔱 **Novo Decreto Divino — Tower Deep**\n─────────────────────────────\nVou te guiar pelo formulário. Digite `cancelar` a qualquer momento.\n\n**Etapa 1/6 — Versão**\nQual é o número da versão? *(ex: v0.4.0)*');
+  await message.reply('⚡ **OS DEUSES CONVOCAM UM NOVO DECRETO**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Os pergaminhos do Olimpo aguardam suas palavras...*\n\nDigite `cancelar` a qualquer momento para silenciar os deuses.\n\n**— Pergaminho I de VI — A Versão —**\nQual selo carregará este decreto? *(ex: v0.4.0)*');
 }
 
 async function processarEtapa(message) {
@@ -282,25 +282,25 @@ async function processarEtapa(message) {
   const sessao = sessoes.get(userId);
   if (!sessao) return;
   const texto = message.content.trim();
-  if (texto.toLowerCase() === 'cancelar') { sessoes.delete(userId); return message.reply('❌ Formulário cancelado.'); }
+  if (texto.toLowerCase() === 'cancelar') { sessoes.delete(userId); return message.reply('🌑 *Os pergaminhos foram lançados às chamas... O decreto foi esquecido pelos deuses.*'); }
   const { etapa, dados } = sessao;
 
-  if (etapa === 'versao') { dados.versao = texto.startsWith('v') ? texto : `v${texto}`; sessao.etapa = 'titulo'; return message.reply('✅ Versão salva!\n\n**Etapa 2/6 — Título**\nQual é o título desta update?'); }
-  if (etapa === 'titulo') { dados.titulo = texto; sessao.etapa = 'subtitulo'; return message.reply('✅ Título salvo!\n\n**Etapa 3/6 — Subtítulo**\nUma frase épica/lore *(ou `pular`)*'); }
-  if (etapa === 'subtitulo') { dados.subtitulo = texto.toLowerCase() === 'pular' ? '' : texto; sessao.etapa = 'tags'; const lista = Object.entries(TAGS).map(([n, t]) => `**${n}** — ${t.label}`).join('\n'); return message.reply('✅ Subtítulo salvo!\n\n**Etapa 4/6 — Tags**\nEscolha as tags *(ex: 1,3)*:\n\n' + lista); }
-  if (etapa === 'tags') { dados.tags = texto.split(',').map(s => s.trim()).filter(n => TAGS[n]).map(n => TAGS[n].key); if (!dados.tags.length) dados.tags = ['novo']; sessao.etapa = 'mudancas'; dados.mudancas = []; return message.reply('✅ Tags salvas!\n\n**Etapa 5/6 — Mudanças**\nListe uma por mensagem. Digite `pronto` quando terminar.'); }
+  if (etapa === 'versao') { dados.versao = texto.startsWith('v') ? texto : `v${texto}`; sessao.etapa = 'titulo'; return message.reply('⚡ *O selo foi gravado nos pergaminhos.*\n\n**— Pergaminho II de VI — O Título —**\nCom que nome os mortais conhecerão este decreto?'); }
+  if (etapa === 'titulo') { dados.titulo = texto; sessao.etapa = 'subtitulo'; return message.reply('⚡ *O título ecoa pelos salões do Olimpo.*\n\n**— Pergaminho III de VI — A Profecia —**\nUma frase sábia para acompanhar o decreto... *(ou `pular`)*'); }
+  if (etapa === 'subtitulo') { dados.subtitulo = texto.toLowerCase() === 'pular' ? '' : texto; sessao.etapa = 'tags'; const lista = Object.entries(TAGS).map(([n, t]) => `**${n}** — ${t.label}`).join('\n'); return message.reply('⚡ *As palavras foram inscritas.*\n\n**— Pergaminho IV de VI — Os Estandartes —**\nQuais símbolos divinos carregarão este decreto? *(ex: 1,3)*\n\n' + lista); }
+  if (etapa === 'tags') { dados.tags = texto.split(',').map(s => s.trim()).filter(n => TAGS[n]).map(n => TAGS[n].key); if (!dados.tags.length) dados.tags = ['novo']; sessao.etapa = 'mudancas'; dados.mudancas = []; return message.reply('⚡ *Os estandartes foram hasteados.*\n\n**— Pergaminho V de VI — As Obras dos Deuses —**\nRelate cada mudança, uma por mensagem.\nQuando terminar, proclame: `pronto`'); }
   if (etapa === 'mudancas') {
-    if (texto.toLowerCase() === 'pronto') { if (!dados.mudancas.length) return message.reply('⚠️ Adicione pelo menos uma mudança.'); sessao.etapa = 'proximo'; return message.reply(`✅ ${dados.mudancas.length} mudança(s)!\n\n**Etapa 6/6 — Próxima Update**\nAlguma prévia? *(ou \`pular\`)*`); }
+    if (texto.toLowerCase() === 'pronto') { if (!dados.mudancas.length) return message.reply('⚠️ *Os deuses exigem ao menos uma obra registrada, mortal.*'); sessao.etapa = 'proximo'; return message.reply(`⚡ *${dados.mudancas.length} obra(s) registrada(s) nos pergaminhos eternos.*\n\n**— Pergaminho VI de VI — O Horizonte —**\nHá visões do próximo decreto? *(ou \`pular\`)*`); }
     dados.mudancas.push(texto); return message.react('✅');
   }
   if (etapa === 'proximo') {
     dados.proximo = texto.toLowerCase() === 'pular' ? null : texto; sessao.etapa = 'confirmacao';
     const tagLabels = dados.tags.map(t => Object.values(TAGS).find(x => x.key === t)?.label || t).join(', ');
-    return message.reply(`📜 **Resumo — Confirme:**\n─────────────────────────────\n📌 **Versão:** ${dados.versao}\n📖 **Título:** ${dados.titulo}\n💬 **Subtítulo:** ${dados.subtitulo || '*(vazio)*'}\n🏷️ **Tags:** ${tagLabels}\n📝 **Mudanças:** ${dados.mudancas.length} item(s)\n🔮 **Próxima:** ${dados.proximo || '*(nenhuma)*'}\n─────────────────────────────\nDigite **\`confirmar\`** ou **\`cancelar\`**.`);
+    return message.reply(`🔱 **O DECRETO ESTÁ PRONTO PARA SER PROCLAMADO**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚔️ **Versão:** ${dados.versao}\n📖 **Título:** ${dados.titulo}\n🌟 **Profecia:** ${dados.subtitulo || '*(silêncio dos deuses)*'}\n🏛️ **Estandartes:** ${tagLabels}\n📜 **Obras:** ${dados.mudancas.length} registrada(s)\n🔮 **Horizonte:** ${dados.proximo || '*(os oráculos silenciam)*'}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Proclame* **\`confirmar\`** *para gravar nos anais eternos, ou* **\`cancelar\`** *para retornar ao silêncio.*`);
   }
   if (etapa === 'confirmacao') {
-    if (texto.toLowerCase() !== 'confirmar') { sessoes.delete(userId); return message.reply('❌ Publicação cancelada.'); }
-    await message.reply('⏳ Publicando no site...');
+    if (texto.toLowerCase() !== 'confirmar') { sessoes.delete(userId); return message.reply('🌑 *Que assim seja... O decreto retorna ao silêncio eterno. Os pergaminhos aguardam nova convocação.*'); return; }
+    await message.reply('⚡ *Os trovões de Zeus ressoam... O decreto está sendo gravado nos anais eternos do Olimpo...*');
     try {
       const dadosAtuais = await lerGist();
       const mes = new Date().toLocaleString('pt-BR', { month: 'short', year: 'numeric' });
@@ -309,7 +309,7 @@ async function processarEtapa(message) {
       if (dados.proximo) dadosAtuais.proximaUpdate = dados.proximo;
       await salvarGist(dadosAtuais);
       sessoes.delete(userId);
-      await message.reply(`🔱 **Publicado!** **${dados.versao} — ${dados.titulo}** já está no site.`);
+      await message.reply(`🔱 **DECRETO PROCLAMADO!**\n*Os deuses selaram* **${dados.versao} — ${dados.titulo}** *nos pergaminhos eternos. Os mortais já podem contemplar.*`);
 
       // ── Anúncio automático no canal #anúncios ──────────────
       if (CONFIG.CANAL_ANUNCIO_ID) {
@@ -320,22 +320,26 @@ async function processarEtapa(message) {
           const linhas = [
             '@everyone',
             '',
-            '🔱 **NOVO DECRETO DIVINO — ' + dados.versao + '**',
-            '## ' + dados.titulo,
+            '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+            '⚡ **DECRETO DIVINO PROCLAMADO** ⚡',
+            '**' + dados.versao + ' — ' + dados.titulo + '**',
+            '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
             dados.subtitulo ? ('*"' + dados.subtitulo + '"*') : '',
             '',
             tagLabels,
             '',
-            '**O que mudou:**',
+            '📜 **Obras dos Deuses:**',
             mudancasTexto,
             dados.proximo ? ('🔮 **Próxima update:** ' + dados.proximo) : '',
             '',
-            '🌐 https://italozkv.github.io/tower-deep/changelog.html',
+            '',
+            '🌐 **Pergaminhos Eternos:** https://italozkv.github.io/tower-deep/changelog.html',
+            '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
           ].filter(l => l !== null);
           await canalAnuncio.send(linhas.join('\n'));
         } catch (err) { console.error('Erro ao anunciar:', err.message); }
       }
-    } catch (err) { console.error(err); sessoes.delete(userId); await message.reply('❌ Erro ao publicar. Verifique as configurações.'); }
+    } catch (err) { console.error(err); sessoes.delete(userId); await message.reply('⚠️ *Os ventos do Érebo interferiram na proclamação. Os deuses pedem que verifiques as configurações e tentes novamente.*'); }
   }
 }
 
@@ -357,21 +361,27 @@ client.on('guildMemberAdd', async (member) => {
     const dm = await member.createDM();
     const botName = member.guild.members.me?.user.username || 'Bot';
     await dm.send([
-      `🔱 **Bem-vindo(a) ao Tower Deep, ${member.user.username}!**`,
+      `⚡ **OS DEUSES DO OLIMPO NOTARAM SUA CHEGADA, ${member.user.username}!** ⚡`,
       ``,
-      `Os deuses do Olimpo notaram sua chegada. Você entrou no servidor oficial do **Tower Deep** — o Tower Defense de tema grego no Roblox!`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `*Um novo mortal adentra os salões sagrados...*`,
       ``,
-      `**O que você pode fazer aqui:**`,
-      `> ✦ Jogar e dar feedback sobre o jogo`,
-      `> ✦ Votar em sugestões no site`,
-      `> ✦ Ficar por dentro das atualizações`,
-      `> ✦ Me mencionar (@${botName}) para tirar dúvidas sobre o jogo`,
+      `Você foi convocado para o servidor oficial do **Tower Deep** — o Tower Defense de deuses gregos no Roblox. Seu destino foi inscrito nos pergaminhos do Olimpo.`,
+      ``,
+      ``,
+      `🏛️ **O que os deuses te permitem aqui:**`,
+      `> ⚔️ Enfrentar as hostes do Tártaro e deixar sua marca`,
+      `> 🗳️ Votar nos decretos futuros do Olimpo`,
+      `> 📜 Acompanhar os decretos divinos`,
+      `> 🔮 Consultar o Oráculo (@${botName}) para sabedoria sobre o jogo`,
       ``,
       `🌐 **Site oficial:** https://italozkv.github.io/tower-deep/`,
       `📜 **Changelog:** https://italozkv.github.io/tower-deep/changelog.html`,
       `🗳️ **Votar em features:** https://italozkv.github.io/tower-deep/votos.html`,
       ``,
-      `*Que os deuses guiem seus passos, mortal.* ⚡`,
+      ``,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `*Que Zeus ilumine teu caminho e Ares fortaleça teu braço, mortal.* 🔱`,
     ].join('\n'));
   } catch (err) {
     console.error(`Não foi possível enviar DM para ${member.user.tag}:`, err.message);
@@ -387,11 +397,11 @@ client.on('messageCreate', async (message) => {
   // ── IA: menção em qualquer canal ──────────────────────────
   if (mencionouBot) {
     if (!CONFIG.OPENAI_KEY) {
-      return message.reply('⚠️ O Oráculo ainda está adormecido. Configure a variável `OPENAI_KEY` no Railway para ativá-lo.');
+      return message.reply('🌑 *O Oráculo mergulhou em sono profundo... Sua sabedoria aguarda ser despertada. Configure a variável `OPENAI_KEY` no Railway para invocar sua presença.*');
     }
     const pergunta = texto.replace(/<@!?\d+>/g, '').trim();
     if (!pergunta) {
-      return message.reply('✨ O Oráculo aguarda sua pergunta, mortal. O que deseja saber?');
+      return message.reply('✨ *O Oráculo te observa, mortal... Mas nenhuma palavra foi proferida. Qual é o teu questionamento?*');
     }
     return await responderComIA(message, pergunta);
   }
@@ -402,23 +412,13 @@ client.on('messageCreate', async (message) => {
     if (texto === '!listar') {
       try {
         const dados = await lerGist();
-        if (!dados.updates?.length) return message.reply('Nenhuma update publicada ainda.');
-        return message.reply('📜 **Updates:**\n' + dados.updates.map(u => `• **${u.versao}** — ${u.titulo} *(${u.data})*`).join('\n'));
-      } catch { return message.reply('❌ Erro ao buscar updates.'); }
+        if (!dados.updates?.length) return message.reply('📜 *Os pergaminhos estão em branco, mortal. Nenhum decreto foi proclamado ainda.*');
+        return message.reply('📜 **ANAIS DO OLIMPO — Decretos Proclamados**\n━━━━━━━━━━━━━━━━━━━━━━━━━\n' + dados.updates.map(u => `⚔️ **${u.versao}** — ${u.titulo} *(${u.data})*`).join('\n'));
+      } catch { return message.reply('⚠️ *As brumas do Érebo ocultam os pergaminhos... Não foi possível invocar os decretos. Tente novamente.'); }
     }
     if (texto === '!ajuda') {
       return message.reply(
-        '🔱 **Tower Deep Bot — Comandos**\n─────────────────────────────\n' +
-        '`!update`          — Formulário de nova update\n' +
-        '`!listar`          — Ver todas as updates publicadas\n' +
-        '`!enquete <texto>` — Criar enquete com ✅/❌\n' +
-        '`!ajuda`           — Ver esta mensagem\n' +
-        '`cancelar`         — Cancelar formulário em andamento\n\n' +
-        '🤖 **Oráculo (IA)**\n' +
-        'Mencione o bot em qualquer canal:\n' +
-        '`@Bot qual torre é melhor?` — Pergunta geral\n' +
-        '`@Bot bug na torre de Zeus` — Suporte técnico\n' +
-        '`@Bot sugestão: torre de Apolo` — Análise de sugestão'
+        '🔱 **GRIMÓRIO DO OLIMPO — Poderes Disponíveis**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚔️ `!update`          — Iniciar o ritual de novo decreto\n📜 `!listar`          — Consultar os anais do Olimpo\n🗳️ `!enquete <texto>` — Convocar um julgamento divino\n📖 `!ajuda`           — Invocar este grimório\n🌑 `cancelar`         — Encerrar o ritual em andamento\n\n✨ **O Oráculo — Sabedoria Divina**\n*Convoque o Oráculo em qualquer canal:*\n`@Bot qual torre é melhor?` — Consulta geral\n`@Bot bug na torre de Zeus` — Auxílio técnico\n`@Bot sugestão: torre de Apolo` — Análise de visão'
       );
     }
   }
@@ -426,20 +426,17 @@ client.on('messageCreate', async (message) => {
   // ── !enquete — funciona em qualquer canal ─────────────────
   if (texto.startsWith('!enquete ')) {
     const pergunta = texto.slice(9).trim();
-    if (!pergunta) return message.reply('⚠️ Use: `!enquete Sua pergunta aqui`');
+    if (!pergunta) return message.reply('⚠️ *Os deuses precisam de uma questão para julgar, mortal. Use: `!enquete Sua pergunta aqui`*');
     try {
       const msg = await message.channel.send(
-        '🗳️ **ENQUETE DIVINA**\n\n' +
-        '❓ ' + pergunta + '\n\n' +
-        '✅ — Sim / Apoio\n' +
-        '❌ — Não / Contra'
+        '⚡ **JULGAMENTO DIVINO DO OLIMPO** ⚡\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🔮 ' + pergunta + '\n\n*Os deuses aguardam o veredicto dos mortais...*\n\n✅ — Aprovo / A favor\n❌ — Rejeito / Contra'
       );
       await msg.react('✅');
       await msg.react('❌');
       await message.delete().catch(() => {});
     } catch (err) {
       console.error('Erro ao criar enquete:', err.message);
-      message.reply('❌ Não foi possível criar a enquete.');
+      message.reply('⚠️ *As forças do Caos interferiram no julgamento. O Olimpo não pôde ser convocado neste momento.*');
     }
     return;
   }
