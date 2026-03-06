@@ -20,6 +20,7 @@ const CONFIG = {
   GIST_ID:          process.env.GIST_ID,
   CANAL_UPDATE_ID:  process.env.CANAL_ID,          // canal de comandos (!update)
   CANAL_ANUNCIO_ID: process.env.CANAL_ANUNCIO_ID,  // canal #anuncios
+  CANAL_BUGS_ID:    process.env.CANAL_BUGS_ID,      // canal #bugs
   OPENAI_KEY:       process.env.OPENAI_KEY,         // chave da API OpenAI (ChatGPT)
 };
 // ─────────────────────────────────────────────────────────────
@@ -90,6 +91,55 @@ const MAX_HISTORICO = 10; // Últimas 10 mensagens por usuário
 
 // Sessões do formulário de update
 const sessoes = new Map();
+
+// ─────────────────────────────────────────────────────────────
+//  SISTEMA DE XP — Nível 1 a 10 com nomes de deuses gregos
+// ─────────────────────────────────────────────────────────────
+const xpData = new Map(); // userId -> { xp, nivel, lastMsg }
+
+const NIVEIS = [
+  { nivel: 1,  nome: 'Mortal Comum',    xpMin: 0    },
+  { nivel: 2,  nome: 'Mensageiro de Hermes', xpMin: 50  },
+  { nivel: 3,  nome: 'Guardião de Atena',    xpMin: 150 },
+  { nivel: 4,  nome: 'Guerreiro de Ares',    xpMin: 300 },
+  { nivel: 5,  nome: 'Navegante de Poseidon',xpMin: 500 },
+  { nivel: 6,  nome: 'Arauto de Zeus',       xpMin: 750 },
+  { nivel: 7,  nome: 'Campeão de Apolo',     xpMin: 1050},
+  { nivel: 8,  nome: 'Semideus do Olimpo',   xpMin: 1400},
+  { nivel: 9,  nome: 'Herói Imortal',        xpMin: 1800},
+  { nivel: 10, nome: 'Divindade do Olimpo',  xpMin: 2300},
+];
+
+function getNivel(xp) {
+  let atual = NIVEIS[0];
+  for (const n of NIVEIS) { if (xp >= n.xpMin) atual = n; }
+  return atual;
+}
+
+function getProximoNivel(xp) {
+  for (const n of NIVEIS) { if (xp < n.xpMin) return n; }
+  return null;
+}
+
+function ganharXP(userId) {
+  const agora = Date.now();
+  if (!xpData.has(userId)) xpData.set(userId, { xp: 0, nivel: 1, lastMsg: 0 });
+  const dados = xpData.get(userId);
+  if (agora - dados.lastMsg < 30000) return null; // cooldown 30s
+  const ganho = Math.floor(Math.random() * 6) + 5; // 5-10 XP por msg
+  const nivelAntes = getNivel(dados.xp);
+  dados.xp += ganho;
+  dados.lastMsg = agora;
+  const nivelDepois = getNivel(dados.xp);
+  if (nivelDepois.nivel > nivelAntes.nivel) return { subiu: true, nivel: nivelDepois };
+  return { subiu: false };
+}
+
+// ─────────────────────────────────────────────────────────────
+//  SESSÕES DO FORMULÁRIO DE BUG E SUGESTÃO
+// ─────────────────────────────────────────────────────────────
+const sessoesBug = new Map();
+const sessoesSugestao = new Map();
 
 // Tags de update
 const TAGS = {
@@ -344,13 +394,115 @@ async function processarEtapa(message) {
 }
 
 // ─────────────────────────────────────────────────────────────
+//  FORMULÁRIO DE BUG
+// ─────────────────────────────────────────────────────────────
+async function iniciarBug(message) {
+  const userId = message.author.id;
+  if (sessoesBug.has(userId)) return message.reply('⚠️ *Mortal, já tens um relato em andamento. Proclama `cancelarbug` para encerrar.*');
+  sessoesBug.set(userId, { etapa: 'titulo', dados: {} });
+  await message.reply('🐛 **RELATO DE ANOMALIA DIVINA**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Os oráculos registrarão tua visão...*\n\nDigite `cancelarbug` a qualquer momento.\n\n**— Etapa 1/3 — O Fenômeno —**\nDescreva brevemente o bug em uma frase:');
+}
+
+async function processarBug(message) {
+  const userId = message.author.id;
+  const sessao = sessoesBug.get(userId);
+  if (!sessao) return;
+  const texto = message.content.trim();
+  if (texto.toLowerCase() === 'cancelarbug') {
+    sessoesBug.delete(userId);
+    return message.reply('🌑 *O relato foi descartado pelos ventos do Olimpo.*');
+  }
+  const { etapa, dados } = sessao;
+  if (etapa === 'titulo') {
+    dados.titulo = texto; sessao.etapa = 'descricao';
+    return message.reply('⚡ *Registrado.*\n\n**— Etapa 2/3 — Os Detalhes —**\nComo reproduzir o bug? Descreva o passo a passo:');
+  }
+  if (etapa === 'descricao') {
+    dados.descricao = texto; sessao.etapa = 'versao';
+    return message.reply('⚡ *Anotado pelos escribas.*\n\n**— Etapa 3/3 — A Versão —**\nQual versão do jogo você estava jogando? *(ex: v0.3.0 ou "não sei")*');
+  }
+  if (etapa === 'versao') {
+    dados.versao = texto;
+    sessoesBug.delete(userId);
+    // Postar no canal #bugs
+    if (CONFIG.CANAL_BUGS_ID) {
+      try {
+        const canal = await client.channels.fetch(CONFIG.CANAL_BUGS_ID);
+        await canal.send(
+          '🐛 **NOVA ANOMALIA RELATADA**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+          `👤 **Mortal:** ${message.author.tag}\n` +
+          `📋 **Fenômeno:** ${dados.titulo}\n` +
+          `📝 **Detalhes:** ${dados.descricao}\n` +
+          `🎮 **Versão:** ${dados.versao}\n` +
+          `⏰ **Quando:** <t:${Math.floor(Date.now()/1000)}:R>\n` +
+          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+        );
+      } catch (err) { console.error('Erro ao postar bug:', err.message); }
+    }
+    return message.reply('🔱 *Os oráculos registraram tua visão nos pergaminhos sagrados. Os deuses-desenvolvedores serão notificados, mortal. Que Atena guie a correção.*');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  FORMULÁRIO DE SUGESTÃO
+// ─────────────────────────────────────────────────────────────
+async function iniciarSugestao(message) {
+  const userId = message.author.id;
+  if (sessoesSugestao.has(userId)) return message.reply('⚠️ *Mortal, já tens uma visão em andamento. Proclama `cancelarsugestao` para encerrar.*');
+  sessoesSugestao.set(userId, { etapa: 'titulo', dados: {} });
+  await message.reply('💡 **VISÃO PARA O OLIMPO**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Os deuses ouvirão tua ideia...*\n\nDigite `cancelarsugestao` a qualquer momento.\n\n**— Etapa 1/3 — O Título da Visão —**\nResuma sua sugestão em uma frase:');
+}
+
+async function processarSugestao(message) {
+  const userId = message.author.id;
+  const sessao = sessoesSugestao.get(userId);
+  if (!sessao) return;
+  const texto = message.content.trim();
+  if (texto.toLowerCase() === 'cancelarsugestao') {
+    sessoesSugestao.delete(userId);
+    return message.reply('🌑 *Tua visão retornou ao silêncio eterno.*');
+  }
+  const { etapa, dados } = sessao;
+  if (etapa === 'titulo') {
+    dados.titulo = texto; sessao.etapa = 'descricao';
+    return message.reply('⚡ *O título foi inscrito.*\n\n**— Etapa 2/3 — Os Detalhes —**\nDescreva melhor sua ideia. Como funcionaria no jogo?');
+  }
+  if (etapa === 'descricao') {
+    dados.descricao = texto; sessao.etapa = 'categoria';
+    return message.reply('⚡ *A visão foi registrada.*\n\n**— Etapa 3/3 — O Domínio —**\nQual categoria melhor descreve sua sugestão?\n\n**1** — ⚔️ Torre nova\n**2** — 🗺️ Mapa novo\n**3** — ⚙️ Mecânica\n**4** — 🎉 Evento\n**5** — 🔧 Outro');
+  }
+  if (etapa === 'categoria') {
+    const cats = { '1':'⚔️ Torre nova', '2':'🗺️ Mapa novo', '3':'⚙️ Mecânica', '4':'🎉 Evento', '5':'🔧 Outro' };
+    dados.categoria = cats[texto] || '🔧 Outro';
+    sessoesSugestao.delete(userId);
+    // Criar enquete no canal atual
+    try {
+      const msg = await message.channel.send(
+        '💡 **NOVA VISÃO DOS MORTAIS**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+        `👤 **Mortal:** ${message.author.tag}\n` +
+        `🏷️ **Categoria:** ${dados.categoria}\n` +
+        `📋 **Ideia:** ${dados.titulo}\n` +
+        `📝 **Detalhes:** ${dados.descricao}\n` +
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '*Os deuses aguardam o veredito dos mortais...*\n\n' +
+        '👍 — Apoio esta visão!\n👎 — Os deuses rejeitam'
+      );
+      await msg.react('👍');
+      await msg.react('👎');
+    } catch (err) { console.error('Erro ao postar sugestão:', err.message); }
+    return message.reply('🔱 *Tua visão foi proclamada no Olimpo! Os mortais irão julgá-la. Que os deuses decidam seu destino.*');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 //  EVENTOS
 // ─────────────────────────────────────────────────────────────
 client.once('ready', () => {
   console.log(`\n🔱 Tower Deep Bot online — ${client.user.tag}`);
   console.log(`🤖 IA (Oráculo): ${CONFIG.OPENAI_KEY ? '✅ Ativada' : '❌ DESATIVADA — adicione OPENAI_KEY no Railway'}`);
   console.log(`📜 Canal de updates: ${CONFIG.CANAL_UPDATE_ID || '❌ não configurado'}`);
-  console.log(`📢 Canal de anúncios: ${CONFIG.CANAL_ANUNCIO_ID || '❌ não configurado'}\n`);
+  console.log(`📢 Canal de anúncios: ${CONFIG.CANAL_ANUNCIO_ID || '❌ não configurado'}`);
+  console.log(`🐛 Canal de bugs: ${CONFIG.CANAL_BUGS_ID || '❌ não configurado'}\n`);
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -418,7 +570,7 @@ client.on('messageCreate', async (message) => {
     }
     if (texto === '!ajuda') {
       return message.reply(
-        '🔱 **GRIMÓRIO DO OLIMPO — Poderes Disponíveis**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚔️ `!update`          — Iniciar o ritual de novo decreto\n📜 `!listar`          — Consultar os anais do Olimpo\n🗳️ `!enquete <texto>` — Convocar um julgamento divino\n📖 `!ajuda`           — Invocar este grimório\n🌑 `cancelar`         — Encerrar o ritual em andamento\n\n✨ **O Oráculo — Sabedoria Divina**\n*Convoque o Oráculo em qualquer canal:*\n`@Bot qual torre é melhor?` — Consulta geral\n`@Bot bug na torre de Zeus` — Auxílio técnico\n`@Bot sugestão: torre de Apolo` — Análise de visão'
+        '🔱 **GRIMÓRIO DO OLIMPO — Poderes Disponíveis**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📣 **Comandos Globais** *(qualquer canal)*\n🐛 `!bug`             — Relatar uma anomalia\n💡 `!sugestao`        — Enviar uma visão ao Olimpo\n🏆 `!rank`            — Ver teu título divino\n🗳️ `!enquete <texto>` — Convocar um julgamento\n\n⚔️ **Canal de Decretos** *(canal de comandos)*\n📜 `!update`          — Ritual de novo decreto\n📋 `!listar`          — Consultar os anais\n📖 `!ajuda`           — Invocar este grimório\n\n✨ **O Oráculo** *(mencione em qualquer canal)*\n`@Bot qual torre é melhor?` — Consulta geral\n`@Bot tenho um bug` — Auxílio técnico\n`@Bot sugestão: torre de Apolo` — Análise de visão'
       );
     }
   }
@@ -441,9 +593,68 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  // ── Formulário em andamento ───────────────────────────────
-  if (sessoes.has(message.author.id)) {
-    return await processarEtapa(message);
+  // ── Formulário de bug em andamento ──────────────────────────
+  if (sessoesBug.has(message.author.id)) return await processarBug(message);
+
+  // ── Formulário de sugestão em andamento ──────────────────────
+  if (sessoesSugestao.has(message.author.id)) return await processarSugestao(message);
+
+  // ── Formulário de update em andamento ────────────────────────
+  if (sessoes.has(message.author.id)) return await processarEtapa(message);
+
+  // ── Comandos globais (!bug, !sugestao, !rank) ─────────────────
+  if (texto === '!bug') return iniciarBug(message);
+  if (texto === '!sugestao') return iniciarSugestao(message);
+
+  if (texto === '!rank') {
+    const userId = message.author.id;
+    if (!xpData.has(userId)) xpData.set(userId, { xp: 0, nivel: 1, lastMsg: 0 });
+    const dados = xpData.get(userId);
+    const nivel = getNivel(dados.xp);
+    const proximo = getProximoNivel(dados.xp);
+    const faltam = proximo ? proximo.xpMin - dados.xp : 0;
+    return message.reply(
+      `✨ **PERGAMINHO DE ${message.author.username.toUpperCase()}**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🏛️ **Título:** ${nivel.nome}\n` +
+      `⚡ **XP Total:** ${dados.xp}\n` +
+      `📊 **Nível:** ${nivel.nivel}/10\n` +
+      (proximo ? `🔮 **Próximo título:** ${proximo.nome} *(faltam ${faltam} XP)*` : `🌟 *Atingiste a divindade máxima, imortal!*`) +
+      `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+    );
+  }
+
+  // ── Respostas automáticas por palavras-chave ──────────────────
+  const t = texto.toLowerCase();
+  const ehComando = texto.startsWith('!');
+  if (!ehComando && !mencionouBot) {
+    if (t.includes('bug') || t.includes('erro') || t.includes('bugado')) {
+      await message.reply('🐛 *Encontraste uma anomalia, mortal? Os oráculos estão prontos para registrá-la!*\nUse **`!bug`** para relatar com detalhes e notificar os desenvolvedores.');
+    } else if ((t.includes('quando sai') || t.includes('quando lança') || t.includes('quando vai sair') || t.includes('proxima update') || t.includes('próxima update'))) {
+      try {
+        const dados = await lerGist();
+        const previa = dados.proximaUpdate;
+        if (previa) await message.reply(`🔮 *Os oráculos revelam...*\n\n**Próximo Decreto:** ${previa}\n\n*Acompanhe os anais: https://italozkv.github.io/tower-deep/changelog.html*`);
+        else await message.reply('🔮 *Os oráculos permanecem em silêncio sobre o próximo decreto... Aguarda, mortal.*');
+      } catch { await message.reply('🔮 *As visões dos oráculos estão turvas no momento...*'); }
+    } else if (t.includes('sugestão') || t.includes('sugestao') || t.includes('ideia')) {
+      await message.reply('💡 *Tens uma visão para o Olimpo, mortal?*\nUse **`!sugestao`** para submeter tua ideia e deixar os outros mortais votarem!');
+    } else if (t.includes('update') || t.includes('atualização') || t.includes('atualizacao')) {
+      await message.reply('📜 *Buscas os decretos divinos?*\nUse **`!listar`** no canal de comandos ou veja em: https://italozkv.github.io/tower-deep/changelog.html');
+    } else if (t.includes('ajuda') || t.includes('como funciona') || t.includes('o que o bot faz')) {
+      await message.reply('📖 *O Grimório do Olimpo está à tua disposição, mortal!*\n\n⚔️ `!bug` — Relatar um bug\n💡 `!sugestao` — Enviar sugestão\n🏆 `!rank` — Ver teu título divino\n🗳️ `!enquete` — Criar enquete\n\n*Ou me mencione diretamente para falar com o Oráculo!*');
+    }
+  }
+
+  // ── Sistema de XP ─────────────────────────────────────────────
+  if (message.guild && !ehComando) {
+    const resultado = ganharXP(message.author.id);
+    if (resultado?.subiu) {
+      await message.channel.send(
+        `⚡ **ASCENSÃO DIVINA!** ⚡\n` +
+        `${message.author} subiu para o título de **${resultado.nivel.nome}** (Nível ${resultado.nivel.nivel})!\n` +
+        `*Os deuses do Olimpo reconhecem tua dedicação, mortal.* 🔱`
+      );
+    }
   }
 });
 
