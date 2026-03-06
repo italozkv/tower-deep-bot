@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 const https = require('https');
 
 const client = new Client({
@@ -23,6 +23,25 @@ const CONFIG = {
   CANAL_BUGS_ID:    process.env.CANAL_BUGS_ID,      // canal #bugs
   OPENAI_KEY:       process.env.OPENAI_KEY,         // chave da API OpenAI (ChatGPT)
 };
+// ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+//  REGISTRO DE SLASH COMMANDS
+// ─────────────────────────────────────────────────────────────
+const slashCommands = [
+  new SlashCommandBuilder().setName('bug').setDescription('Reportar uma anomalia divina ao Olimpo'),
+  new SlashCommandBuilder().setName('sugestao').setDescription('Enviar uma visão para os deuses do Olimpo'),
+].map(cmd => cmd.toJSON());
+
+async function registrarSlashCommands(clientId) {
+  const rest = new REST({ version: '10' }).setToken(CONFIG.DISCORD_TOKEN);
+  try {
+    await rest.put(Routes.applicationCommands(clientId), { body: slashCommands });
+    console.log('✅ Slash commands registrados globalmente!');
+  } catch (err) {
+    console.error('Erro ao registrar slash commands:', err.message);
+  }
+}
 // ─────────────────────────────────────────────────────────────
 
 // ══════════════════════════════════════════════════════════════
@@ -138,8 +157,7 @@ function ganharXP(userId) {
 // ─────────────────────────────────────────────────────────────
 //  SESSÕES DO FORMULÁRIO DE BUG E SUGESTÃO
 // ─────────────────────────────────────────────────────────────
-const sessoesBug = new Map();
-const sessoesSugestao = new Map();
+// Sessões de bug/sugestão removidas — agora usa Modals
 
 // Tags de update
 const TAGS = {
@@ -396,129 +414,154 @@ async function processarEtapa(message) {
 // ─────────────────────────────────────────────────────────────
 //  FORMULÁRIO DE BUG
 // ─────────────────────────────────────────────────────────────
-async function iniciarBug(message) {
-  const userId = message.author.id;
-  if (sessoesBug.has(userId)) return message.reply('⚠️ *Mortal, já tens um relato em andamento. Verifica tuas mensagens privadas.*');
-  try {
-    const dm = await message.author.createDM();
-    sessoesBug.set(userId, { etapa: 'titulo', dados: {}, dmChannel: dm });
-    await dm.send('🐛 **RELATO DE ANOMALIA DIVINA**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Os oráculos registrarão tua visão em sigilo...*\n\nDigite `cancelarbug` a qualquer momento.\n\n**— Etapa 1/3 — O Fenômeno —**\nDescreva brevemente o bug em uma frase:');
-    await message.reply('📨 *Os oráculos aguardam tua visão em privado, mortal. Verifica tuas mensagens diretas!*');
-  } catch {
-    await message.reply('⚠️ *Não foi possível enviar DM. Verifica se tens as mensagens privadas ativadas no servidor.*');
-  }
-}
+// ─────────────────────────────────────────────────────────────
+//  SLASH COMMANDS + MODALS
+// ─────────────────────────────────────────────────────────────
+client.on('interactionCreate', async (interaction) => {
 
-async function processarBug(message) {
-  // Só processa DMs
-  if (message.guild) return;
-  const userId = message.author.id;
-  const sessao = sessoesBug.get(userId);
-  if (!sessao) return;
-  const texto = message.content.trim();
-  const dm = sessao.dmChannel || message.channel;
-  if (texto.toLowerCase() === 'cancelarbug') {
-    sessoesBug.delete(userId);
-    return dm.send('🌑 *O relato foi descartado pelos ventos do Olimpo.*');
+  // ── /bug — abre modal ──────────────────────────────────────
+  if (interaction.isChatInputCommand() && interaction.commandName === 'bug') {
+    const modal = new ModalBuilder()
+      .setCustomId('modal_bug')
+      .setTitle('🐛 Relato de Anomalia Divina');
+
+    const fenomeno = new TextInputBuilder()
+      .setCustomId('bug_titulo')
+      .setLabel('O Fenômeno — Descreva o bug em uma frase')
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder('Ex: A torre de Zeus não ataca inimigos voadores')
+      .setRequired(true)
+      .setMaxLength(100);
+
+    const detalhes = new TextInputBuilder()
+      .setCustomId('bug_descricao')
+      .setLabel('Os Detalhes — Como reproduzir o bug?')
+      .setStyle(TextInputStyle.Paragraph)
+      .setPlaceholder('Passo a passo do que aconteceu...')
+      .setRequired(true)
+      .setMaxLength(500);
+
+    const versao = new TextInputBuilder()
+      .setCustomId('bug_versao')
+      .setLabel('A Versão — Qual versão do jogo?')
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder('Ex: v0.3.0 (ou "não sei")')
+      .setRequired(false)
+      .setMaxLength(20);
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(fenomeno),
+      new ActionRowBuilder().addComponents(detalhes),
+      new ActionRowBuilder().addComponents(versao),
+    );
+    return await interaction.showModal(modal);
   }
-  const { etapa, dados } = sessao;
-  if (etapa === 'titulo') {
-    dados.titulo = texto; sessao.etapa = 'descricao';
-    return dm.send('⚡ *Registrado.*\n\n**— Etapa 2/3 — Os Detalhes —**\nComo reproduzir o bug? Descreva o passo a passo:');
+
+  // ── /sugestao — abre modal ────────────────────────────────
+  if (interaction.isChatInputCommand() && interaction.commandName === 'sugestao') {
+    const modal = new ModalBuilder()
+      .setCustomId('modal_sugestao')
+      .setTitle('💡 Visão para o Olimpo');
+
+    const titulo = new TextInputBuilder()
+      .setCustomId('sug_titulo')
+      .setLabel('O Título — Resuma sua sugestão')
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder('Ex: Torre de Artemis com flechas de gelo')
+      .setRequired(true)
+      .setMaxLength(100);
+
+    const descricao = new TextInputBuilder()
+      .setCustomId('sug_descricao')
+      .setLabel('Os Detalhes — Como funcionaria no jogo?')
+      .setStyle(TextInputStyle.Paragraph)
+      .setPlaceholder('Descreva a ideia com mais detalhes...')
+      .setRequired(true)
+      .setMaxLength(500);
+
+    const categoria = new TextInputBuilder()
+      .setCustomId('sug_categoria')
+      .setLabel('O Domínio — Categoria (torre/mapa/mecânica/evento)')
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder('torre, mapa, mecânica, evento ou outro')
+      .setRequired(false)
+      .setMaxLength(20);
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(titulo),
+      new ActionRowBuilder().addComponents(descricao),
+      new ActionRowBuilder().addComponents(categoria),
+    );
+    return await interaction.showModal(modal);
   }
-  if (etapa === 'descricao') {
-    dados.descricao = texto; sessao.etapa = 'versao';
-    return dm.send('⚡ *Anotado pelos escribas.*\n\n**— Etapa 3/3 — A Versão —**\nQual versão do jogo você estava jogando? *(ex: v0.3.0 ou "não sei")*');
-  }
-  if (etapa === 'versao') {
-    dados.versao = texto;
-    sessoesBug.delete(userId);
+
+  // ── Submit do modal de bug ────────────────────────────────
+  if (interaction.isModalSubmit() && interaction.customId === 'modal_bug') {
+    const bugTitulo = interaction.fields.getTextInputValue('bug_titulo');
+    const bugDesc   = interaction.fields.getTextInputValue('bug_descricao');
+    const bugVersao = interaction.fields.getTextInputValue('bug_versao') || 'não informado';
+
+    // Responde de forma efêmera (só o usuário vê)
+    await interaction.reply({
+      content: '🔱 *Os oráculos registraram tua anomalia nos pergaminhos sagrados. Os deuses-desenvolvedores serão notificados. Que Atena guie a correção, mortal.*',
+      ephemeral: true,
+    });
+
+    // Posta no canal #bugs
     if (CONFIG.CANAL_BUGS_ID) {
       try {
         const canal = await client.channels.fetch(CONFIG.CANAL_BUGS_ID);
         await canal.send(
           '🐛 **NOVA ANOMALIA RELATADA**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-          `👤 **Mortal:** ${message.author.tag}\n` +
-          `📋 **Fenômeno:** ${dados.titulo}\n` +
-          `📝 **Detalhes:** ${dados.descricao}\n` +
-          `🎮 **Versão:** ${dados.versao}\n` +
+          `👤 **Mortal:** ${interaction.user.tag}\n` +
+          `📋 **Fenômeno:** ${bugTitulo}\n` +
+          `📝 **Detalhes:** ${bugDesc}\n` +
+          `🎮 **Versão:** ${bugVersao}\n` +
           `⏰ **Quando:** <t:${Math.floor(Date.now()/1000)}:R>\n` +
           '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
         );
       } catch (err) { console.error('Erro ao postar bug:', err.message); }
     }
-    return dm.send('🔱 *Os oráculos registraram tua visão nos pergaminhos sagrados. Os deuses-desenvolvedores serão notificados, mortal. Que Atena guie a correção.*');
+    return;
   }
-}
 
-// ─────────────────────────────────────────────────────────────
-//  FORMULÁRIO DE SUGESTÃO
-// ─────────────────────────────────────────────────────────────
-async function iniciarSugestao(message) {
-  const userId = message.author.id;
-  if (sessoesSugestao.has(userId)) return message.reply('⚠️ *Mortal, já tens uma visão em andamento. Verifica tuas mensagens privadas.*');
-  try {
-    const dm = await message.author.createDM();
-    sessoesSugestao.set(userId, { etapa: 'titulo', dados: {}, dmChannel: dm, guildChannel: message.channel });
-    await dm.send('💡 **VISÃO PARA O OLIMPO**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Os deuses ouvirão tua ideia em sigilo...*\n\nDigite `cancelarsugestao` a qualquer momento.\n\n**— Etapa 1/3 — O Título da Visão —**\nResuma sua sugestão em uma frase:');
-    await message.reply('📨 *Os deuses aguardam tua visão em privado, mortal. Verifica tuas mensagens diretas!*');
-  } catch {
-    await message.reply('⚠️ *Não foi possível enviar DM. Verifica se tens as mensagens privadas ativadas no servidor.*');
-  }
-}
+  // ── Submit do modal de sugestão ───────────────────────────
+  if (interaction.isModalSubmit() && interaction.customId === 'modal_sugestao') {
+    const sugTitulo = interaction.fields.getTextInputValue('sug_titulo');
+    const sugDesc   = interaction.fields.getTextInputValue('sug_descricao');
+    const sugCat    = interaction.fields.getTextInputValue('sug_categoria') || 'outro';
 
-async function processarSugestao(message) {
-  // Só processa DMs
-  if (message.guild) return;
-  const userId = message.author.id;
-  const sessao = sessoesSugestao.get(userId);
-  if (!sessao) return;
-  const texto = message.content.trim();
-  const dm = sessao.dmChannel || message.channel;
-  if (texto.toLowerCase() === 'cancelarsugestao') {
-    sessoesSugestao.delete(userId);
-    return dm.send('🌑 *Tua visão retornou ao silêncio eterno.*');
+    // Responde de forma efêmera
+    await interaction.reply({
+      content: '🔱 *Tua visão foi proclamada no Olimpo! Os mortais irão julgá-la. Que os deuses decidam seu destino.*',
+      ephemeral: true,
+    });
+
+    // Posta sugestão com enquete no canal
+    try {
+      const msg = await interaction.channel.send(
+        '💡 **NOVA VISÃO DOS MORTAIS**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+        `👤 **Mortal:** ${interaction.user.tag}\n` +
+        `🏷️ **Categoria:** ${sugCat}\n` +
+        `📋 **Ideia:** ${sugTitulo}\n` +
+        `📝 **Detalhes:** ${sugDesc}\n` +
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '*Os deuses aguardam o veredito dos mortais...*\n\n' +
+        '👍 — Apoio esta visão!\n👎 — Os deuses rejeitam'
+      );
+      await msg.react('👍');
+      await msg.react('👎');
+    } catch (err) { console.error('Erro ao postar sugestão:', err.message); }
+    return;
   }
-  const { etapa, dados } = sessao;
-  if (etapa === 'titulo') {
-    dados.titulo = texto; sessao.etapa = 'descricao';
-    return dm.send('⚡ *O título foi inscrito.*\n\n**— Etapa 2/3 — Os Detalhes —**\nDescreva melhor sua ideia. Como funcionaria no jogo?');
-  }
-  if (etapa === 'descricao') {
-    dados.descricao = texto; sessao.etapa = 'categoria';
-    return dm.send('⚡ *A visão foi registrada.*\n\n**— Etapa 3/3 — O Domínio —**\nQual categoria melhor descreve sua sugestão?\n\n**1** — ⚔️ Torre nova\n**2** — 🗺️ Mapa novo\n**3** — ⚙️ Mecânica\n**4** — 🎉 Evento\n**5** — 🔧 Outro');
-  }
-  if (etapa === 'categoria') {
-    const cats = { '1':'⚔️ Torre nova', '2':'🗺️ Mapa novo', '3':'⚙️ Mecânica', '4':'🎉 Evento', '5':'🔧 Outro' };
-    dados.categoria = cats[texto] || '🔧 Outro';
-    sessoesSugestao.delete(userId);
-    // Postar resultado no canal do servidor com enquete
-    const canalServidor = sessao.guildChannel;
-    if (canalServidor) {
-      try {
-        const msg = await canalServidor.send(
-          '💡 **NOVA VISÃO DOS MORTAIS**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-          `👤 **Mortal:** ${message.author.tag}\n` +
-          `🏷️ **Categoria:** ${dados.categoria}\n` +
-          `📋 **Ideia:** ${dados.titulo}\n` +
-          `📝 **Detalhes:** ${dados.descricao}\n` +
-          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-          '*Os deuses aguardam o veredito dos mortais...*\n\n' +
-          '👍 — Apoio esta visão!\n👎 — Os deuses rejeitam'
-        );
-        await msg.react('👍');
-        await msg.react('👎');
-      } catch (err) { console.error('Erro ao postar sugestão:', err.message); }
-    }
-    return dm.send('🔱 *Tua visão foi proclamada no Olimpo! Os mortais irão julgá-la em público. Que os deuses decidam seu destino.*');
-  }
-}
+});
 
 // ─────────────────────────────────────────────────────────────
 //  EVENTOS
 // ─────────────────────────────────────────────────────────────
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`\n🔱 Tower Deep Bot online — ${client.user.tag}`);
+  await registrarSlashCommands(client.user.id);
   console.log(`🤖 IA (Oráculo): ${CONFIG.OPENAI_KEY ? '✅ Ativada' : '❌ DESATIVADA — adicione OPENAI_KEY no Railway'}`);
   console.log(`📜 Canal de updates: ${CONFIG.CANAL_UPDATE_ID || '❌ não configurado'}`);
   console.log(`📢 Canal de anúncios: ${CONFIG.CANAL_ANUNCIO_ID || '❌ não configurado'}`);
@@ -564,13 +607,6 @@ client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
   const texto = message.content.trim();
-
-  // ── Processar DMs (formulários de bug e sugestão) ──────────
-  if (!message.guild) {
-    if (sessoesBug.has(message.author.id)) return await processarBug(message);
-    if (sessoesSugestao.has(message.author.id)) return await processarSugestao(message);
-    return; // ignora outras DMs
-  }
 
   const mencionouBot = message.mentions.has(client.user);
 
@@ -625,9 +661,6 @@ client.on('messageCreate', async (message) => {
   if (sessoes.has(message.author.id)) return await processarEtapa(message);
 
   // ── Comandos globais (!bug, !sugestao, !rank) ─────────────────
-  if (texto === '!bug') return iniciarBug(message);
-  if (texto === '!sugestao') return iniciarSugestao(message);
-
   if (texto === '!rank') {
     const userId = message.author.id;
     if (!xpData.has(userId)) xpData.set(userId, { xp: 0, nivel: 1, lastMsg: 0 });
@@ -650,7 +683,7 @@ client.on('messageCreate', async (message) => {
   const ehComando = texto.startsWith('!');
   if (!ehComando && !mencionouBot) {
     if (t.includes('bug') || t.includes('erro') || t.includes('bugado')) {
-      await message.reply('🐛 *Encontraste uma anomalia, mortal? Os oráculos estão prontos para registrá-la!*\nUse **`!bug`** para relatar com detalhes e notificar os desenvolvedores.');
+      await message.reply('🐛 *Encontraste uma anomalia, mortal? Os oráculos estão prontos para registrá-la!*\nUse **`/bug`** para relatar com detalhes — abre um formulário privado!');
     } else if ((t.includes('quando sai') || t.includes('quando lança') || t.includes('quando vai sair') || t.includes('proxima update') || t.includes('próxima update'))) {
       try {
         const dados = await lerGist();
@@ -659,7 +692,7 @@ client.on('messageCreate', async (message) => {
         else await message.reply('🔮 *Os oráculos permanecem em silêncio sobre o próximo decreto... Aguarda, mortal.*');
       } catch { await message.reply('🔮 *As visões dos oráculos estão turvas no momento...*'); }
     } else if (t.includes('sugestão') || t.includes('sugestao') || t.includes('ideia')) {
-      await message.reply('💡 *Tens uma visão para o Olimpo, mortal?*\nUse **`!sugestao`** para submeter tua ideia e deixar os outros mortais votarem!');
+      await message.reply('💡 *Tens uma visão para o Olimpo, mortal?*\nUse **`/sugestao`** para submeter tua ideia — abre um formulário privado!');
     } else if (t.includes('update') || t.includes('atualização') || t.includes('atualizacao')) {
       await message.reply('📜 *Buscas os decretos divinos?*\nUse **`!listar`** no canal de comandos ou veja em: https://italozkv.github.io/tower-deep/changelog.html');
     } else if (t.includes('ajuda') || t.includes('como funciona') || t.includes('o que o bot faz')) {
