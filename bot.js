@@ -479,6 +479,54 @@ const servidor = http.createServer((req, res) => {
     return res.end(JSON.stringify({ status: 'online', tokens: tokensAtivos.size, uptime: Math.floor(process.uptime()) }));
   }
 
+  // ── Listar tokens ativos (apenas nível admin/dono)
+  if (req.method === 'GET' && req.url === '/tokens') {
+    const lista = [];
+    for (const [token, dados] of tokensAtivos.entries()) {
+      lista.push({ token, nivel: dados.nivel, username: dados.username, expira: dados.expira });
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: true, tokens: lista }));
+  }
+
+  // ── Revogar token específico
+  if (req.method === 'POST' && req.url === '/revogar-token') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      try {
+        const { token } = JSON.parse(body);
+        const existed = tokensAtivos.has(token);
+        tokensAtivos.delete(token);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, revogado: existed }));
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, erro: 'JSON inválido.' }));
+      }
+    });
+    return;
+  }
+
+  // ── Revogar todos os tokens
+  if (req.method === 'POST' && req.url === '/revogar-todos') {
+    const total = tokensAtivos.size;
+    tokensAtivos.clear();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: true, total }));
+  }
+
+  // ── Limpar tokens expirados
+  if (req.method === 'POST' && req.url === '/limpar-expirados') {
+    let removidos = 0;
+    const agora = Date.now();
+    for (const [token, dados] of tokensAtivos.entries()) {
+      if (dados.expira < agora) { tokensAtivos.delete(token); removidos++; }
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: true, removidos }));
+  }
+
   res.writeHead(404); res.end();
 });
 
