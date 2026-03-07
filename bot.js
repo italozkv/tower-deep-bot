@@ -44,6 +44,9 @@ const CONFIG = {
   // Sistema de tickets
   CATEGORIA_TICKETS: process.env.CATEGORIA_TICKETS,
   CANAL_LOG_TICKETS: process.env.CANAL_LOG_TICKETS,
+  // 🎁 Sistema de códigos de resgate
+  ROBLOX_API_SECRET: process.env.ROBLOX_API_SECRET || 'tower-deep-secret-2024',
+  CANAL_CODIGOS:     process.env.CANAL_CODIGOS,
   // 🎨 Cores centralizadas
   CORES: {
     PRIMARIA: 0xc9a84c, // Dourado Olimpo
@@ -288,6 +291,47 @@ async function lerEnquetes()         { return lerArquivoJsonDoGist('enquetes.jso
 async function salvarEnquetes(lista) { return salvarArquivoJsonNoGist('enquetes.json', lista); }
 async function lerRoadmap()          { return lerArquivoJsonDoGist('roadmap.json', []); }
 async function salvarRoadmap(v)      { return salvarArquivoJsonNoGist('roadmap.json', v); }
+
+// ─────────────────────────────────────────────────────────────
+// SISTEMA DE CÓDIGOS DE RESGATE
+// ─────────────────────────────────────────────────────────────
+async function lerCodigos()      { return lerArquivoJsonDoGist('codigos.json',  { codigos: [] }); }
+async function salvarCodigos(d)  { return salvarArquivoJsonNoGist('codigos.json', d); }
+async function lerVinculos()     { return lerArquivoJsonDoGist('vinculos.json', { vinculos: [] }); }
+async function salvarVinculos(d) { return salvarArquivoJsonNoGist('vinculos.json', d); }
+
+let _codigosCache = null;
+let _vinculosCache = null;
+let _cacheTTL = 0;
+async function getCache() {
+  if (!_codigosCache || Date.now() > _cacheTTL) {
+    _codigosCache  = await lerCodigos();
+    _vinculosCache = await lerVinculos();
+    _cacheTTL      = Date.now() + 30000;
+  }
+  return { codigos: _codigosCache, vinculos: _vinculosCache };
+}
+function invalidarCache() { _codigosCache = null; _vinculosCache = null; _cacheTTL = 0; }
+
+function gerarCodigo() {
+  const prefixos = ['ZEUS','ARES','HADES','APOLO','ATENA','HERMES','POSEIDON','ARTEMIS'];
+  const pref = prefixos[Math.floor(Math.random() * prefixos.length)];
+  const rand = () => Math.random().toString(36).toUpperCase().slice(2,6).replace(/[^A-Z0-9]/g,'').padEnd(4,'X');
+  return `${pref}-${rand()}-${rand()}`;
+}
+
+const TIPOS_RECOMPENSA = {
+  moedas:   { emoji: '🪙', label: 'Moedas',         unidade: 'moedas' },
+  gemas:    { emoji: '💎', label: 'Gemas',           unidade: 'gemas'  },
+  xp:       { emoji: '⚡', label: 'XP Bônus',        unidade: 'XP'     },
+  torre:    { emoji: '🏛️', label: 'Torre Exclusiva', unidade: ''       },
+  skin:     { emoji: '🎨', label: 'Skin de Torre',   unidade: ''       },
+  titulo:   { emoji: '📜', label: 'Título/Badge',    unidade: ''       },
+  cosmetico:{ emoji: '✨', label: 'Item Cosmético',  unidade: ''       },
+};
+
+// Sessões de criação de código por admin
+const sessoescodigo = new Map();
 
 // ─────────────────────────────────────────────────────────────
 // HELPERS DE PERMISSÃO POR CARGO
@@ -1165,6 +1209,33 @@ const slashCommands = [
     .setName('verificar')
     .setDescription('✅ Vincule sua conta do Roblox ao Discord')
     .addStringOption(opt => opt.setName('usuario').setDescription('Seu nome de usuário no Roblox').setRequired(true)),
+
+  // 🎁 Sistema de códigos
+  new SlashCommandBuilder()
+    .setName('gencodigo')
+    .setDescription('🎁 Gerar um código de resgate com recompensas (Admin)')
+    .addStringOption(opt => opt.setName('descricao').setDescription('Descrição do código (ex: Evento de Natal)').setRequired(true))
+    .addIntegerOption(opt => opt.setName('maxusos').setDescription('Quantas contas podem usar (padrão: ilimitado)').setRequired(false))
+    .addIntegerOption(opt => opt.setName('expira_horas').setDescription('Expira em X horas (padrão: nunca)').setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName('codigo')
+    .setDescription('📋 Gerenciar códigos de resgate (Admin)')
+    .addSubcommand(sub => sub.setName('listar').setDescription('📜 Listar todos os códigos'))
+    .addSubcommand(sub => sub.setName('desativar').setDescription('🚫 Desativar um código')
+      .addStringOption(opt => opt.setName('codigo').setDescription('Código a desativar').setRequired(true)))
+    .addSubcommand(sub => sub.setName('info').setDescription('🔍 Ver detalhes de um código')
+      .addStringOption(opt => opt.setName('codigo').setDescription('Código a consultar').setRequired(true))),
+
+  new SlashCommandBuilder()
+    .setName('vincular')
+    .setDescription('🔗 Vincule sua conta do Roblox para usar códigos de resgate')
+    .addStringOption(opt => opt.setName('usuario').setDescription('Seu nome de usuário exato no Roblox').setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName('minhaconta')
+    .setDescription('👤 Ver sua conta Roblox vinculada e códigos resgatados'),
+
 ].map(cmd => cmd.toJSON());
 
 async function registrarSlashCommands(clientId) {
@@ -1474,7 +1545,329 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     // ──────────────────────────────────────────────────────────
-    // /verificar — vincular conta do Roblox
+    // ──────────────────────────────────────────────────────────
+    // SISTEMA DE CÓDIGOS DE RESGATE
+    // ──────────────────────────────────────────────────────────
+
+    // /vincular — vínculo Discord ↔ Roblox para uso de códigos
+    if (interaction.isChatInputCommand() && interaction.commandName === 'vincular') {
+      const robloxUser = interaction.options.getString('usuario');
+      await interaction.deferReply({ ephemeral: true });
+      try {
+        const res  = await fetch(`https://users.roblox.com/v1/users/search?keyword=${encodeURIComponent(robloxUser)}&limit=10`);
+        const data = await res.json();
+        if (!data.data || !data.data.length)
+          return interaction.editReply({ content: '⚠️ *Usuário não encontrado no Roblox. Verifique o nome exato.*' });
+
+        const rbUser = data.data[0];
+        const db     = await lerVinculos();
+        // Verifica se já existe vínculo com essa conta Roblox
+        const jaVinculado = db.vinculos.find(v => v.robloxId === String(rbUser.id));
+        if (jaVinculado && jaVinculado.discordId !== interaction.user.id)
+          return interaction.editReply({ content: `⚠️ *A conta **${rbUser.name}** já está vinculada a outro usuário Discord.*` });
+
+        // Remove vínculo anterior do mesmo Discord
+        db.vinculos = db.vinculos.filter(v => v.discordId !== interaction.user.id);
+        db.vinculos.push({ discordId: interaction.user.id, robloxId: String(rbUser.id), robloxName: rbUser.name, vinculadoEm: new Date().toISOString() });
+        await salvarVinculos(db);
+        invalidarCache();
+
+        // Cargo verificado
+        if (CONFIG.CARGO_VERIFICADO) {
+          const cargo = interaction.guild?.roles?.cache?.get(CONFIG.CARGO_VERIFICADO);
+          if (cargo) await interaction.member.roles.add(cargo).catch(() => {});
+        }
+
+        const embed = new EmbedBuilder()
+          .setColor(CONFIG.CORES.SUCESSO)
+          .setTitle('🔗 Conta Vinculada!')
+          .setDescription(`Tua conta Discord foi vinculada ao jogador **${rbUser.name}** no Roblox!
+
+Agora podes resgatar códigos no jogo usando tua conta.`)
+          .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${rbUser.id}&width=420&height=420&format=png`)
+          .addFields(
+            { name: '👤 Roblox', value: rbUser.name, inline: true },
+            { name: '🆔 ID',     value: String(rbUser.id), inline: true },
+          )
+          .setFooter({ text: 'Tower Deep · Vínculo registrado' })
+          .setTimestamp();
+        return interaction.editReply({ embeds: [embed] });
+      } catch (err) {
+        console.error('Erro /vincular:', err.message);
+        return interaction.editReply({ content: '⚠️ *Erro ao vincular. Tente novamente.*' });
+      }
+    }
+
+    // /minhaconta — ver conta vinculada e códigos resgatados
+    if (interaction.isChatInputCommand() && interaction.commandName === 'minhaconta') {
+      await interaction.deferReply({ ephemeral: true });
+      try {
+        const db      = await lerVinculos();
+        const vinculo = db.vinculos.find(v => v.discordId === interaction.user.id);
+        if (!vinculo) {
+          return interaction.editReply({ content: '❌ *Você não possui uma conta Roblox vinculada. Use `/vincular` primeiro.*' });
+        }
+        const codigosDb   = await lerCodigos();
+        const resgatados  = codigosDb.codigos.filter(c => c.usadoPor?.some(u => u.robloxId === vinculo.robloxId));
+        const embed = new EmbedBuilder()
+          .setColor(CONFIG.CORES.INFO)
+          .setTitle('👤 Tua Conta Vinculada')
+          .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${vinculo.robloxId}&width=420&height=420&format=png`)
+          .addFields(
+            { name: '🎮 Roblox',         value: vinculo.robloxName,                                             inline: true  },
+            { name: '🆔 Roblox ID',       value: vinculo.robloxId,                                               inline: true  },
+            { name: '📅 Vinculado em',    value: new Date(vinculo.vinculadoEm).toLocaleDateString('pt-BR'),      inline: true  },
+            { name: '🎁 Códigos Usados',  value: String(resgatados.length),                                      inline: true  },
+          )
+          .setFooter({ text: 'Tower Deep · Use /vincular para atualizar' });
+
+        if (resgatados.length) {
+          const lista = resgatados.slice(-5).map(c => `• \`${c.id}\` — ${c.descricao}`).join('
+');
+          embed.addFields({ name: '📜 Últimos resgates', value: lista });
+        }
+        return interaction.editReply({ embeds: [embed] });
+      } catch (err) {
+        return interaction.editReply({ content: '⚠️ Erro ao buscar conta. Tente novamente.' });
+      }
+    }
+
+    // /gencodigo — gerar código de resgate (Admin)
+    if (interaction.isChatInputCommand() && interaction.commandName === 'gencodigo') {
+      if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫 *Apenas Admins podem gerar códigos.*', ephemeral: true });
+
+      const descricao   = interaction.options.getString('descricao');
+      const maxUsos     = interaction.options.getInteger('maxusos') || 0; // 0 = ilimitado
+      const expiraHoras = interaction.options.getInteger('expira_horas') || 0;
+
+      // Seletor de recompensas
+      const menuRecompensas = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`gencodigo_recomp_${interaction.user.id}`)
+          .setPlaceholder('🎁 Selecione as recompensas do código...')
+          .setMinValues(1).setMaxValues(7)
+          .addOptions(Object.entries(TIPOS_RECOMPENSA).map(([val, r]) => ({
+            label: r.label, value: val, emoji: r.emoji,
+            description: `Adicionar ${r.label} como recompensa`,
+          })))
+      );
+
+      // Salva sessão temporária
+      sessoescodigo.set(interaction.user.id, { descricao, maxUsos, expiraHoras, step: 'recompensas' });
+      setTimeout(() => sessoescodigo.delete(interaction.user.id), 5 * 60 * 1000);
+
+      const embed = new EmbedBuilder()
+        .setColor(CONFIG.CORES.PRIMARIA)
+        .setTitle('🎁 Novo Código de Resgate')
+        .setDescription(`**Descrição:** ${descricao}
+**Max Usos:** ${maxUsos || 'Ilimitado'}
+**Expira:** ${expiraHoras ? `em ${expiraHoras}h` : 'Nunca'}
+
+*Seleciona as recompensas que este código vai conceder:*`)
+        .setFooter({ text: 'Passo 1/2 — Selecionar Recompensas' });
+
+      return interaction.reply({ embeds: [embed], components: [menuRecompensas], ephemeral: true });
+    }
+
+    // Select menu — escolha de recompensas do /gencodigo
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('gencodigo_recomp_')) {
+      const adminId = interaction.customId.split('_')[2];
+      if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
+
+      const sessao = sessoescodigo.get(interaction.user.id);
+      if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada. Use /gencodigo novamente.', ephemeral: true });
+
+      const tiposSelecionados = interaction.values;
+      sessao.tiposSelecionados = tiposSelecionados;
+      sessao.step = 'valores';
+      sessao.valoresIdx = 0;
+      sessao.recompensas = [];
+
+      // Para recompensas de quantidade (moedas, gemas, xp) pede valor
+      // Para itens (torre, skin, titulo, cosmetico) pede nome do item
+      const tipo = tiposSelecionados[0];
+      const info = TIPOS_RECOMPENSA[tipo];
+      const modal = new ModalBuilder()
+        .setCustomId(`gencodigo_valor_${interaction.user.id}_0`)
+        .setTitle(`Recompensa: ${info.label}`)
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('valor')
+              .setLabel(['moedas','gemas','xp'].includes(tipo) ? `Quantidade de ${info.unidade}` : `Nome do item (${info.label})`)
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+              .setPlaceholder(['moedas','gemas','xp'].includes(tipo) ? 'Ex: 500' : 'Ex: Torre Zeus Lendária')
+          )
+        );
+      return interaction.showModal(modal);
+    }
+
+    // Modal — valor da recompensa do /gencodigo
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('gencodigo_valor_')) {
+      const parts   = interaction.customId.split('_');
+      const adminId = parts[2];
+      const idx     = parseInt(parts[3]);
+      if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
+
+      const sessao = sessoescodigo.get(interaction.user.id);
+      if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
+
+      const valorRaw = interaction.fields.getTextInputValue('valor');
+      const tipo     = sessao.tiposSelecionados[idx];
+      const info     = TIPOS_RECOMPENSA[tipo];
+      const valor    = ['moedas','gemas','xp'].includes(tipo) ? (parseInt(valorRaw) || 0) : valorRaw;
+      sessao.recompensas.push({ tipo, valor, label: `${info.emoji} ${info.label}: ${valor}${info.unidade ? ' '+info.unidade : ''}` });
+
+      // Próxima recompensa?
+      const proxIdx = idx + 1;
+      if (proxIdx < sessao.tiposSelecionados.length) {
+        const proxTipo = sessao.tiposSelecionados[proxIdx];
+        const proxInfo = TIPOS_RECOMPENSA[proxTipo];
+        const modal2 = new ModalBuilder()
+          .setCustomId(`gencodigo_valor_${interaction.user.id}_${proxIdx}`)
+          .setTitle(`Recompensa ${proxIdx+1}/${sessao.tiposSelecionados.length}: ${proxInfo.label}`)
+          .addComponents(
+            new ActionRowBuilder().addComponents(
+              new TextInputBuilder()
+                .setCustomId('valor')
+                .setLabel(['moedas','gemas','xp'].includes(proxTipo) ? `Quantidade de ${proxInfo.unidade}` : `Nome do item`)
+                .setStyle(TextInputStyle.Short).setRequired(true)
+                .setPlaceholder(['moedas','gemas','xp'].includes(proxTipo) ? 'Ex: 1000' : 'Ex: Skin Olimpo')
+            )
+          );
+        return interaction.showModal(modal2);
+      }
+
+      // Todas as recompensas coletadas — gerar o código!
+      await interaction.deferUpdate();
+      try {
+        const codigo = gerarCodigo();
+        const db     = await lerCodigos();
+        const expira = sessao.expiraHoras ? new Date(Date.now() + sessao.expiraHoras * 3600000).toISOString() : null;
+        db.codigos.push({
+          id: codigo, descricao: sessao.descricao, recompensas: sessao.recompensas,
+          criadoPor: interaction.user.tag, criadoEm: new Date().toISOString(),
+          expira, maxUsos: sessao.maxUsos, usadoPor: [], ativo: true,
+        });
+        await salvarCodigos(db);
+        invalidarCache();
+        sessoescodigo.delete(interaction.user.id);
+
+        // Embed de confirmação privado para o admin
+        const embedConf = new EmbedBuilder()
+          .setColor(CONFIG.CORES.SUCESSO)
+          .setTitle('✅ Código Gerado!')
+          .addFields(
+            { name: '🎁 Código',       value: `\`${codigo}\``,                                                   inline: false },
+            { name: '📝 Descrição',    value: sessao.descricao,                                                   inline: true  },
+            { name: '👥 Max Usos',     value: sessao.maxUsos ? String(sessao.maxUsos) : 'Ilimitado',              inline: true  },
+            { name: '⏰ Expira',        value: expira ? new Date(expira).toLocaleDateString('pt-BR') : 'Nunca',   inline: true  },
+            { name: '🎀 Recompensas',  value: sessao.recompensas.map(r => r.label).join('
+'),                   inline: false },
+          )
+          .setFooter({ text: 'O código foi anunciado no canal de códigos' });
+        await interaction.editReply({ embeds: [embedConf], components: [] });
+
+        // Anúncio público no canal de códigos
+        const canalCodigos = CONFIG.CANAL_CODIGOS
+          ? interaction.guild?.channels?.cache?.get(CONFIG.CANAL_CODIGOS)
+          : interaction.channel;
+
+        if (canalCodigos) {
+          const embedAnuncio = new EmbedBuilder()
+            .setColor(CONFIG.CORES.PRIMARIA)
+            .setTitle('🎁 NOVO CÓDIGO DE RESGATE!')
+            .setDescription(`*Os deuses do Olimpo presenteiam os mortais dedicados!*
+
+📜 **${sessao.descricao}**`)
+            .addFields(
+              { name: '🔑 Código',      value: `## \`${codigo}\``,                                              inline: false },
+              { name: '🎀 Recompensas', value: sessao.recompensas.map(r => r.label).join('
+'),                 inline: false },
+              { name: '👥 Usos',        value: sessao.maxUsos ? `${sessao.maxUsos} usos disponíveis` : 'Ilimitado', inline: true },
+              { name: '⏰ Válido até',  value: expira ? new Date(expira).toLocaleDateString('pt-BR') : 'Sem prazo', inline: true },
+            )
+            .addFields({ name: '📖 Como resgatar?', value: 'Abra o jogo → Menu de Códigos → Cole o código acima!
+*É necessário ter a conta Roblox vinculada com `/vincular`.*' })
+            .setFooter({ text: 'Tower Deep · Código válido 1x por conta Roblox' })
+            .setTimestamp();
+
+          const botoesAnuncio = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setLabel('🎮 Jogar Agora').setStyle(ButtonStyle.Link).setURL('https://www.roblox.com/games/'),
+            new ButtonBuilder().setLabel('🔗 Vincular Conta').setStyle(ButtonStyle.Primary).setCustomId('btn_vincular_info'),
+          );
+          await canalCodigos.send({ content: '@everyone', embeds: [embedAnuncio], components: [botoesAnuncio] });
+        }
+      } catch (err) {
+        console.error('Erro ao gerar código:', err.message);
+        await interaction.editReply({ content: '⚠️ Erro ao salvar código. Tente novamente.', components: [] });
+      }
+      return;
+    }
+
+    // Botão — info de vincular
+    if (interaction.isButton() && interaction.customId === 'btn_vincular_info') {
+      return interaction.reply({
+        content: '🔗 *Para vincular tua conta Roblox, usa o comando `/vincular` e coloca o teu nome de usuário no Roblox!*',
+        ephemeral: true,
+      });
+    }
+
+    // /codigo listar / desativar / info (Admin)
+    if (interaction.isChatInputCommand() && interaction.commandName === 'codigo') {
+      if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫 *Apenas Admins.*', ephemeral: true });
+      await interaction.deferReply({ ephemeral: true });
+      const sub = interaction.options.getSubcommand();
+      const db  = await lerCodigos();
+
+      if (sub === 'listar') {
+        if (!db.codigos.length) return interaction.editReply({ content: '📜 *Nenhum código criado ainda.*' });
+        const lista = db.codigos.slice(-20).reverse().map(c => {
+          const status = !c.ativo ? '🔴' : c.expira && new Date(c.expira) < new Date() ? '🟡' : '🟢';
+          const usos   = `${c.usadoPor?.length || 0}${c.maxUsos ? '/'+c.maxUsos : ''}`;
+          return `${status} \`${c.id}\` — ${c.descricao} *(${usos} usos)*`;
+        }).join('
+');
+        return interaction.editReply({ content: `📋 **Códigos (últimos 20):**
+${lista}` });
+      }
+
+      if (sub === 'desativar') {
+        const id = interaction.options.getString('codigo').toUpperCase();
+        const c  = db.codigos.find(x => x.id === id);
+        if (!c) return interaction.editReply({ content: `❌ Código \`${id}\` não encontrado.` });
+        c.ativo = false;
+        await salvarCodigos(db);
+        invalidarCache();
+        return interaction.editReply({ content: `🚫 Código \`${id}\` desativado com sucesso.` });
+      }
+
+      if (sub === 'info') {
+        const id = interaction.options.getString('codigo').toUpperCase();
+        const c  = db.codigos.find(x => x.id === id);
+        if (!c) return interaction.editReply({ content: `❌ Código \`${id}\` não encontrado.` });
+        const embed = new EmbedBuilder()
+          .setColor(c.ativo ? CONFIG.CORES.SUCESSO : CONFIG.CORES.ERRO)
+          .setTitle(`🔍 Código: \`${c.id}\``)
+          .addFields(
+            { name: '📝 Descrição',   value: c.descricao,                                                          inline: true  },
+            { name: '🟢 Ativo',       value: c.ativo ? 'Sim' : 'Não',                                              inline: true  },
+            { name: '👥 Usos',        value: `${c.usadoPor?.length||0}${c.maxUsos?'/'+c.maxUsos:''}`,               inline: true  },
+            { name: '📅 Criado em',   value: new Date(c.criadoEm).toLocaleDateString('pt-BR'),                     inline: true  },
+            { name: '⏰ Expira',       value: c.expira ? new Date(c.expira).toLocaleDateString('pt-BR') : 'Nunca', inline: true  },
+            { name: '🎀 Recompensas', value: c.recompensas.map(r => r.label).join('
+') || 'Nenhuma',              inline: false },
+          );
+        if (c.usadoPor?.length) {
+          embed.addFields({ name: `👤 Usadopor (${c.usadoPor.length})`, value: c.usadoPor.slice(-10).map(u => `• ${u.robloxName} (${new Date(u.usadoEm).toLocaleDateString('pt-BR')})`).join('
+') });
+        }
+        return interaction.editReply({ embeds: [embed] });
+      }
+    }
+
+    // /verificar — vincular conta do Roblox (legado)
     // ──────────────────────────────────────────────────────────
     if (interaction.isChatInputCommand() && interaction.commandName === 'verificar') {
       const robloxUser = interaction.options.getString('usuario');
