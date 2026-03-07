@@ -38,6 +38,8 @@ const CONFIG = {
   // Sistema de tickets — adicione no Railway
   CATEGORIA_TICKETS: process.env.CATEGORIA_TICKETS, // ID da categoria onde os tickets serão criados
   CANAL_LOG_TICKETS: process.env.CANAL_LOG_TICKETS,  // Canal para log/transcrições de tickets
+  // Cargo automático ao entrar no servidor
+  CARGO_MEMBRO: process.env.CARGO_MEMBRO || '1479896423679131688', // Gamerule (cargo padrão)
 };
 
 const missingVars = [];
@@ -1652,6 +1654,20 @@ client.once('ready', async () => {
 // BOAS-VINDAS
 // ─────────────────────────────────────────────────────────────
 client.on('guildMemberAdd', async (member) => {
+  // ── Cargo automático (Gamerule) ──────────────────────────
+  try {
+    const cargo = member.guild.roles.cache.get(CONFIG.CARGO_MEMBRO);
+    if (cargo) {
+      await member.roles.add(cargo);
+      console.log(`✅ Cargo "${cargo.name}" atribuído a ${member.user.tag}`);
+    } else {
+      console.warn(`⚠️ Cargo CARGO_MEMBRO (${CONFIG.CARGO_MEMBRO}) não encontrado no servidor.`);
+    }
+  } catch (err) {
+    console.error(`❌ Erro ao atribuir cargo a ${member.user.tag}:`, err.message);
+  }
+
+  // ── DM de boas-vindas ────────────────────────────────────
   try {
     const dm      = await member.createDM();
     const botName = member.guild.members.me?.user.username || 'Bot';
