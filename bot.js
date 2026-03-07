@@ -326,11 +326,33 @@ function gerarCodigo() {
 // Admin pode adicionar mais com /itemcadastrar
 // ─────────────────────────────────────────────────────────────
 const TIPOS_RECOMPENSA = {
-  moedas:   { emoji: '🪙', label: 'Moedas',         unidade: 'moedas', temLista: false },
-  gemas:    { emoji: '💎', label: 'Gemas',           unidade: 'gemas',  temLista: false },
-  xp:       { emoji: '⚡', label: 'XP Bônus',        unidade: 'XP',     temLista: false },
-  item:     { emoji: '🎁', label: 'Item do Jogo',    unidade: '',       temLista: true  },
+  moedas:         { emoji: '🪙', label: 'GodCoins',      unidade: 'Moedas',  temLista: false },
+  gemas:          { emoji: '💎', label: 'Gems',          unidade: 'Gemas',   temLista: false },
+  presents:       { emoji: '🎁', label: 'Presents',      unidade: 'Presents',temLista: false },
+  favor_greek:    { emoji: '🏛️', label: 'Favor Grego',   unidade: 'Favor',   temLista: false },
+  favor_norse:    { emoji: '🛡️', label: 'Favor Nórdico', unidade: 'Favor',   temLista: false },
+  favor_egyptian: { emoji: '𓂀', label: 'Favor Egípcio', unidade: 'Favor',   temLista: false },
+  xp:             { emoji: '⚡', label: 'XP Bônus',      unidade: 'XP',      temLista: false },
+  item:           { emoji: '🎁', label: 'Item do Jogo',  unidade: '',        temLista: true  },
 };
+
+function normalizarCategoriaItem(categoriaRaw) {
+  const categoria = String(categoriaRaw || '').trim();
+  if (!categoria) return 'Outros';
+
+  // Base (ItemConfig)
+  const baseCats = new Set(['Material', 'Crystal', 'Essence', 'Core', 'Shard', 'Consumable', 'Currency', 'Special']);
+  if (baseCats.has(categoria)) return `Base > ${categoria}`;
+
+  // Semideus (SemideusItemConfig)
+  if (categoria.startsWith('Essência')) return 'Semideus > Essências Divinas';
+  if (categoria === 'DNA' || categoria.startsWith('DNA')) return 'Semideus > DNA de Criaturas';
+  if (categoria === 'Cristal Alma' || categoria.startsWith('Cristal')) return 'Semideus > Cristais de Alma';
+  if (categoria === 'Catalisador' || categoria.startsWith('Catalisador')) return 'Semideus > Catalisadores';
+  if (categoria === 'Auxiliar' || categoria.startsWith('Auxiliar')) return 'Semideus > Itens Auxiliares';
+
+  return categoria;
+}
 
 // Catálogo fixo extraído dos ItemConfig e SemideusItemConfig do jogo
 // Categorias: Material, Crystal, Essence, Core, Shard, Special, Currency,
@@ -461,7 +483,14 @@ const RARIDADE_EMOJI = {
 async function getCatalogoCompleto() {
   const db = await lerCodigos();
   const extras = db.itensExtras || [];
-  return [...CATALOGO_FIXO, ...extras];
+  const merged = [...CATALOGO_FIXO, ...extras];
+  const dedup = new Map();
+  for (const it of merged) {
+    if (!it?.id) continue;
+    const normalized = { ...it, categoria: normalizarCategoriaItem(it.categoria) };
+    dedup.set(it.id, normalized);
+  }
+  return [...dedup.values()];
 }
 
 // Helper — formata item para exibição no Discord
@@ -1973,66 +2002,60 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
       }
     }
 
-    // /minhaconta — ver conta vinculada e códigos resgatados
-    if (interaction.isChatInputCommand() && interaction.commandName === 'minhaconta') {
-      await interaction.deferReply({ ephemeral: true });
-      try {
-        const db      = await lerVinculos();
-        const vinculo = db.vinculos.find(v => v.discordId === interaction.user.id);
-        if (!vinculo) {
-          return interaction.editReply({ content: '❌ *Você não possui uma conta Roblox vinculada. Use `/vincular` primeiro.*' });
-        }
-        const codigosDb   = await lerCodigos();
-        const resgatados  = codigosDb.codigos.filter(c => c.usadoPor?.some(u => u.robloxId === vinculo.robloxId));
-        const embed = new EmbedBuilder()
-          .setColor(CONFIG.CORES.INFO)
-          .setTitle('👤 Tua Conta Vinculada')
-          .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${vinculo.robloxId}&width=420&height=420&format=png`)
-          .addFields(
-            { name: '🎮 Roblox',         value: vinculo.robloxName,                                             inline: true  },
-            { name: '🆔 Roblox ID',       value: vinculo.robloxId,                                               inline: true  },
-            { name: '📅 Vinculado em',    value: new Date(vinculo.vinculadoEm).toLocaleDateString('pt-BR'),      inline: true  },
-            { name: '🎁 Códigos Usados',  value: String(resgatados.length),                                      inline: true  },
-          )
-          .setFooter({ text: 'Tower Deep · Use /vincular para atualizar' });
-
-        if (resgatados.length) {
-          const lista = resgatados.slice(-5).map(c => `• \`${c.id}\` — ${c.descricao}`).join('\n');
-
-          embed.addFields({ name: '📜 Últimos resgates', value: lista });
-        }
-        return interaction.editReply({ embeds: [embed] });
-      } catch (err) {
-        return interaction.editReply({ content: '⚠️ Erro ao buscar conta. Tente novamente.' });
-      }
-    }
-
     // /gencodigo — gerar código de resgate (Admin)
     if (interaction.isChatInputCommand() && interaction.commandName === 'gencodigo') {
       if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫 *Apenas Admins podem gerar códigos.*', ephemeral: true });
-      const descricao   = interaction.options.getString('descricao');
-      const maxUsos     = interaction.options.getInteger('maxusos') || 0;
-      const expiraHoras = interaction.options.getInteger('expira_horas') || 0;
-      sessoescodigo.set(interaction.user.id, { descricao, maxUsos, expiraHoras, recompensas: [], tiposIdx: 0, step: 'tipo' });
-      setTimeout(() => sessoescodigo.delete(interaction.user.id), 10 * 60 * 1000);
-      const menuTipo = new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder()
-          .setCustomId(`gc_tipo_${interaction.user.id}`)
-          .setPlaceholder('🎁 Que tipos de recompensa este código vai dar?')
-          .setMinValues(1).setMaxValues(3)
-          .addOptions([
-            { label: 'Moedas',       value: 'moedas', emoji: '🪙', description: 'Moedas do jogo' },
-            { label: 'Gemas',        value: 'gemas',  emoji: '💎', description: 'Gemas premium' },
-            { label: 'XP Bônus',     value: 'xp',     emoji: '⚡', description: 'Experiência extra' },
-            { label: 'Item do Jogo', value: 'item',   emoji: '🎁', description: 'Item real do catálogo (104 itens disponíveis)' },
-          ])
-      );
-      const embed = new EmbedBuilder()
-        .setColor(CONFIG.CORES.PRIMARIA)
-        .setTitle('🎁 Novo Código — Passo 1/3')
-        .setDescription(`**Descrição:** ${descricao}\n**Max Usos:** ${maxUsos || 'Ilimitado'} · **Expira:** ${expiraHoras ? `em ${expiraHoras}h` : 'Nunca'}\n\n*Selecione os tipos de recompensa:*`)
-        .setFooter({ text: 'Passo 1 — Tipo de Recompensa' });
-      return interaction.reply({ embeds: [embed], components: [menuTipo], ephemeral: true });
+
+      await interaction.deferReply({ ephemeral: true });
+
+      try {
+        const descricao   = interaction.options.getString('descricao');
+        const maxUsos     = interaction.options.getInteger('maxusos') || 0;
+        const expiraHoras = interaction.options.getInteger('expira_horas') || 0;
+        const sessao = {
+          descricao,
+          maxUsos,
+          expiraHoras,
+          recompensas: [],
+          tiposIdx: 0,
+          step: 'tipo',
+          tiposSelecionados: []
+        };
+        if (sessoescodigo.has(interaction.user.id)) {
+          const storedSession = sessoescodigo.get(interaction.user.id);
+          sessao.tiposSelecionados = storedSession.tiposSelecionados;
+          sessao.recompensas = storedSession.recompensas;
+        }
+        sessoescodigo.set(interaction.user.id, sessao);
+        setTimeout(() => sessoescodigo.delete(interaction.user.id), 10 * 60 * 1000);
+
+        const tipos = Object.entries(TIPOS_RECOMPENSA).map(([value, info]) => ({
+          label: info.label,
+          value,
+          emoji: info.emoji,
+          description: info.temLista ? 'Seleciona item do catálogo' : `Define quantidade de ${info.unidade}`,
+        }));
+
+        const menuTipo = new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId(`gc_tipo_${interaction.user.id}`)
+            .setPlaceholder('🎁 Que tipos de recompensa este código vai dar?')
+            .setMinValues(1)
+            .setMaxValues(Math.min(tipos.length, 8))
+            .addOptions(tipos.slice(0, 25))
+        );
+
+        const embed = new EmbedBuilder()
+          .setColor(CONFIG.CORES.PRIMARIA)
+          .setTitle('🎁 Novo Código — Passo 1/3')
+          .setDescription(`**Descrição:** ${descricao}\n**Max Usos:** ${maxUsos || 'Ilimitado'} · **Expira:** ${expiraHoras ? `em ${expiraHoras}h` : 'Nunca'}\n\n*Selecione os tipos de recompensa:*`)
+          .setFooter({ text: 'Passo 1 — Tipo de Recompensa' });
+
+        return interaction.editReply({ embeds: [embed], components: [menuTipo] });
+      } catch (err) {
+        console.error('Erro /gencodigo:', err);
+        return interaction.editReply({ content: '⚠️ Ocorreu um erro ao iniciar o /gencodigo. Veja os logs do bot.' });
+      }
     }
 
     // Passo 1 → Tipos selecionados
@@ -2056,6 +2079,9 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
       const categoria = interaction.values[0].replace('cat:', '');
       const catalogo  = await getCatalogoCompleto();
       const itensCat  = catalogo.filter(i => i.categoria === categoria).slice(0, 25);
+      if (!itensCat.length) {
+        return interaction.reply({ content: '⚠️ Nenhum item encontrado nesta categoria.', ephemeral: true });
+      }
       const opsItens  = itensCat.map(i => ({
         label: i.nome.slice(0, 100), value: i.id,
         description: `${i.raridade} · ${i.id}`,
@@ -2083,6 +2109,7 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('gc_item_')) {
       const adminId = interaction.customId.split('gc_item_')[1];
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
+
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
       const catalogo = await getCatalogoCompleto();
