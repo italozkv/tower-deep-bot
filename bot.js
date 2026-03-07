@@ -621,6 +621,126 @@ const servidor = http.createServer((req, res) => {
     return res.end(JSON.stringify({ ok: true, removidos }));
   }
 
+  // ── /roblox/resgatar — chamado pelo jogo Roblox
+  if (req.method === 'POST' && req.url === '/roblox/resgatar') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', async () => {
+      try {
+        const { codigo, robloxId, robloxName, secret } = JSON.parse(body);
+
+        // Valida chave secreta
+        if (secret !== CONFIG.ROBLOX_API_SECRET) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, erro: 'Chave secreta inválida.' }));
+        }
+
+        if (!codigo || !robloxId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, erro: 'codigo e robloxId são obrigatórios.' }));
+        }
+
+        const codigoNorm = String(codigo).toUpperCase().trim();
+        const robloxIdStr = String(robloxId);
+
+        // Carrega dados
+        const dbCodigos  = await lerCodigos();
+        const dbVinculos = await lerVinculos();
+
+        // Verifica vínculo Discord ↔ Roblox
+        const vinculo = dbVinculos.vinculos.find(v => v.robloxId === robloxIdStr);
+        if (!vinculo) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, erro: 'SEM_VINCULO', msg: 'Vincule sua conta no Discord antes de resgatar códigos! Use /vincular no servidor.' }));
+        }
+
+        // Busca o código
+        const c = dbCodigos.codigos.find(x => x.id === codigoNorm);
+        if (!c) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, erro: 'INVALIDO', msg: 'Código inválido ou não existe.' }));
+        }
+        if (!c.ativo) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, erro: 'INATIVO', msg: 'Este código foi desativado.' }));
+        }
+        if (c.expira && new Date(c.expira) < new Date()) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, erro: 'EXPIRADO', msg: 'Este código já expirou.' }));
+        }
+        // Verifica se já usou
+        if (c.usadoPor?.some(u => u.robloxId === robloxIdStr)) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, erro: 'JA_USADO', msg: 'Você já resgatou este código nesta conta.' }));
+        }
+        // Verifica max usos
+        if (c.maxUsos > 0 && (c.usadoPor?.length || 0) >= c.maxUsos) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, erro: 'ESGOTADO', msg: 'Este código atingiu o limite de resgates.' }));
+        }
+
+        // TUDO OK — registra o uso
+        if (!c.usadoPor) c.usadoPor = [];
+        c.usadoPor.push({ robloxId: robloxIdStr, robloxName: robloxName || '?', discordId: vinculo.discordId, usadoEm: new Date().toISOString() });
+        await salvarCodigos(dbCodigos);
+        invalidarCache();
+
+        // Log no canal de tickets / log
+        try {
+          const guilds = client.guilds.cache.values();
+          for (const g of guilds) {
+            const canalLog = CONFIG.CANAL_LOG_TICKETS ? g.channels.cache.get(CONFIG.CANAL_LOG_TICKETS) : null;
+            if (canalLog) {
+              const embedLog = new EmbedBuilder()
+                .setColor(0x3dd68c)
+                .setTitle('🎁 Código Resgatado')
+                .addFields(
+                  { name: '🔑 Código',    value: codigoNorm,                                  inline: true },
+                  { name: '🎮 Roblox',    value: robloxName || robloxIdStr,                   inline: true },
+                  { name: '💬 Discord',   value: `<@${vinculo.discordId}>`,                   inline: true },
+                  { name: '🎀 Itens',     value: c.recompensas.map(r => r.label).join('\n'),  inline: false },
+                )
+                .setTimestamp();
+              await canalLog.send({ embeds: [embedLog] });
+            }
+          }
+        } catch {}
+
+        // Responde com as recompensas para o jogo aplicar
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          ok:          true,
+          msg:         `Código resgatado com sucesso! ${c.descricao}`,
+          recompensas: c.recompensas, // O jogo usa isso para conceder os itens
+        }));
+
+      } catch (err) {
+        console.error('Erro /roblox/resgatar:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, erro: 'Erro interno do servidor.' }));
+      }
+    });
+    return;
+  }
+
+  // ── /roblox/vinculo/:robloxId — verifica se robloxId tem vínculo (usado pelo jogo)
+  if (req.method === 'GET' && req.url.startsWith('/roblox/vinculo/')) {
+    const robloxId = req.url.split('/').pop();
+    const secret   = req.headers['x-secret'];
+    if (secret !== CONFIG.ROBLOX_API_SECRET) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false }));
+    }
+    lerVinculos().then(db => {
+      const vinculo = db.vinculos.find(v => v.robloxId === String(robloxId));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, vinculado: !!vinculo, discordId: vinculo?.discordId || null }));
+    }).catch(() => {
+      res.writeHead(500); res.end(JSON.stringify({ ok: false }));
+    });
+    return;
+  }
+
   res.writeHead(404); res.end();
 });
 
@@ -1622,8 +1742,8 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
           .setFooter({ text: 'Tower Deep · Use /vincular para atualizar' });
 
         if (resgatados.length) {
-          const lista = resgatados.slice(-5).map(c => `• \`${c.id}\` — ${c.descricao}`).join('
-');
+          const lista = resgatados.slice(-5).map(c => `• \`${c.id}\` — ${c.descricao}`).join('\n');
+
           embed.addFields({ name: '📜 Últimos resgates', value: lista });
         }
         return interaction.editReply({ embeds: [embed] });
@@ -1763,8 +1883,8 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
             { name: '📝 Descrição',    value: sessao.descricao,                                                   inline: true  },
             { name: '👥 Max Usos',     value: sessao.maxUsos ? String(sessao.maxUsos) : 'Ilimitado',              inline: true  },
             { name: '⏰ Expira',        value: expira ? new Date(expira).toLocaleDateString('pt-BR') : 'Nunca',   inline: true  },
-            { name: '🎀 Recompensas',  value: sessao.recompensas.map(r => r.label).join('
-'),                   inline: false },
+            { name: '🎀 Recompensas',  value: sessao.recompensas.map(r => r.label).join('\n'),                   inline: false },
+
           )
           .setFooter({ text: 'O código foi anunciado no canal de códigos' });
         await interaction.editReply({ embeds: [embedConf], components: [] });
@@ -1783,13 +1903,12 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
 📜 **${sessao.descricao}**`)
             .addFields(
               { name: '🔑 Código',      value: `## \`${codigo}\``,                                              inline: false },
-              { name: '🎀 Recompensas', value: sessao.recompensas.map(r => r.label).join('
-'),                 inline: false },
+              { name: '🎀 Recompensas', value: sessao.recompensas.map(r => r.label).join('\n'),                 inline: false },
+
               { name: '👥 Usos',        value: sessao.maxUsos ? `${sessao.maxUsos} usos disponíveis` : 'Ilimitado', inline: true },
               { name: '⏰ Válido até',  value: expira ? new Date(expira).toLocaleDateString('pt-BR') : 'Sem prazo', inline: true },
             )
-            .addFields({ name: '📖 Como resgatar?', value: 'Abra o jogo → Menu de Códigos → Cole o código acima!
-*É necessário ter a conta Roblox vinculada com `/vincular`.*' })
+            .addFields({ name: '\U0001f4d6 Como resgatar?', value: 'Abra o jogo → Menu de Códigos → Cole o código acima!\n*É necessário ter a conta Roblox vinculada com /vincular.*' })
             .setFooter({ text: 'Tower Deep · Código válido 1x por conta Roblox' })
             .setTimestamp();
 
@@ -1827,8 +1946,8 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
           const status = !c.ativo ? '🔴' : c.expira && new Date(c.expira) < new Date() ? '🟡' : '🟢';
           const usos   = `${c.usadoPor?.length || 0}${c.maxUsos ? '/'+c.maxUsos : ''}`;
           return `${status} \`${c.id}\` — ${c.descricao} *(${usos} usos)*`;
-        }).join('
-');
+        }).join('\n');
+
         return interaction.editReply({ content: `📋 **Códigos (últimos 20):**
 ${lista}` });
       }
@@ -1856,12 +1975,12 @@ ${lista}` });
             { name: '👥 Usos',        value: `${c.usadoPor?.length||0}${c.maxUsos?'/'+c.maxUsos:''}`,               inline: true  },
             { name: '📅 Criado em',   value: new Date(c.criadoEm).toLocaleDateString('pt-BR'),                     inline: true  },
             { name: '⏰ Expira',       value: c.expira ? new Date(c.expira).toLocaleDateString('pt-BR') : 'Nunca', inline: true  },
-            { name: '🎀 Recompensas', value: c.recompensas.map(r => r.label).join('
-') || 'Nenhuma',              inline: false },
+            { name: '🎀 Recompensas', value: c.recompensas.map(r => r.label).join('\n') || 'Nenhuma',              inline: false },
+
           );
         if (c.usadoPor?.length) {
-          embed.addFields({ name: `👤 Usadopor (${c.usadoPor.length})`, value: c.usadoPor.slice(-10).map(u => `• ${u.robloxName} (${new Date(u.usadoEm).toLocaleDateString('pt-BR')})`).join('
-') });
+          embed.addFields({ name: `👤 Usadopor (${c.usadoPor.length})`, value: c.usadoPor.slice(-10).map(u => `• ${u.robloxName} (${new Date(u.usadoEm).toLocaleDateString('pt-BR')})`).join('\n') });
+
         }
         return interaction.editReply({ embeds: [embed] });
       }
