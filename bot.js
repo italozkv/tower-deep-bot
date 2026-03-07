@@ -918,9 +918,9 @@ client.on('interactionCreate', async (interaction) => {
         new ActionRowBuilder().addComponents(
           new TextInputBuilder()
             .setCustomId('sug_categoria')
-            .setLabel('Categoria: torre, mapa, mecanica, evento, outro')
+            .setLabel('Categoria da sugestão')
             .setStyle(TextInputStyle.Short)
-            .setPlaceholder('torre')
+            .setPlaceholder('torre, mapa, mecanica, evento ou outro')
             .setRequired(false)
             .setMaxLength(20)
         )
