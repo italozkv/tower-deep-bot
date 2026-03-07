@@ -662,23 +662,17 @@ client.on('interactionCreate', async (interaction) => {
     return await interaction.showModal(modal);
   }
 
-  // ── /sugestao — modal que salva no Gist como enquete ─────
+  // ── /sugestao — modal imediato (sem await antes!) ───────
   if (interaction.isChatInputCommand() && interaction.commandName === 'sugestao') {
-    const modal = new ModalBuilder()
-      .setCustomId('modal_sugestao')
-      .setTitle('Visao para o Olimpo');
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('sug_titulo').setLabel('O Titulo - Resuma sua sugestao').setStyle(TextInputStyle.Short).setPlaceholder('Ex: Torre de Artemis com flechas de gelo').setRequired(true).setMaxLength(100)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('sug_descricao').setLabel('Os Detalhes - Como funcionaria?').setStyle(TextInputStyle.Paragraph).setPlaceholder('Descreva a ideia com mais detalhes...').setRequired(true).setMaxLength(400)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('sug_categoria').setLabel('Categoria: torre, mapa, mecanica, evento, outro').setStyle(TextInputStyle.Short).setPlaceholder('torre').setRequired(false).setMaxLength(20)
-      ),
-    );
-    return await interaction.showModal(modal);
+    try {
+      const modal = new ModalBuilder().setCustomId('modal_sugestao').setTitle('Visao para o Olimpo');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('sug_titulo').setLabel('O Titulo - Resuma sua sugestao').setStyle(TextInputStyle.Short).setPlaceholder('Ex: Torre de Artemis com flechas de gelo').setRequired(true).setMaxLength(100)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('sug_descricao').setLabel('Os Detalhes - Como funcionaria?').setStyle(TextInputStyle.Paragraph).setPlaceholder('Descreva a ideia com mais detalhes...').setRequired(true).setMaxLength(400)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('sug_categoria').setLabel('Categoria: torre, mapa, mecanica, evento, outro').setStyle(TextInputStyle.Short).setPlaceholder('torre').setRequired(false).setMaxLength(20)),
+      );
+      return await interaction.showModal(modal);
+    } catch(err) { console.error('Erro ao abrir modal sugestao:', err.message); return; }
   }
 
   // ── Submit do modal de bug ────────────────────────────────
@@ -715,35 +709,25 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isModalSubmit() && interaction.customId === 'modal_sugestao') {
     const sugTitulo = interaction.fields.getTextInputValue('sug_titulo');
     const sugDesc   = interaction.fields.getTextInputValue('sug_descricao');
-    const rawCat    = interaction.fields.getTextInputValue('sug_categoria').toLowerCase().trim();
-    const cats = ['torre','mapa','mecanica','evento'];
-    const sugCat = cats.includes(rawCat) ? rawCat : 'outro';
-
-    await interaction.reply({ content: '⏳ *Os escribas registram tua visão nos pergaminhos...*', ephemeral: true });
+    const rawCat    = (interaction.fields.getTextInputValue('sug_categoria') || '').toLowerCase().trim();
+    const sugCat    = ['torre','mapa','mecanica','evento'].includes(rawCat) ? rawCat : 'outro';
+    // deferReply para evitar timeout do Discord enquanto salva no Gist
+    await interaction.deferReply({ ephemeral: true });
     try {
       const lista = await lerEnquetes();
-      const novaSugestao = {
-        id: `s${Date.now()}`,
-        titulo: sugTitulo, desc: sugDesc, cat: sugCat,
-        votos: 0, origem: 'sugestao', autor: interaction.user.tag,
-        criadoEm: new Date().toISOString()
-      };
-      lista.push(novaSugestao);
+      lista.push({ id: `s${Date.now()}`, titulo: sugTitulo, desc: sugDesc, cat: sugCat, votos: 0, origem: 'sugestao', autor: interaction.user.tag, criadoEm: new Date().toISOString() });
       await salvarEnquetes(lista);
-      // Posta no canal com reação
       const msg = await interaction.channel.send(
         `💡 **VISÃO DE ${interaction.user.username.toUpperCase()}**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `🏷️ **Categoria:** ${sugCat}\n` +
-        `📋 **Ideia:** ${sugTitulo}\n` +
-        `📝 **Detalhes:** ${sugDesc}\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `⬆️ — Apoio esta visão! *(vote também em https://italozkv.github.io/tower-deep/votos.html)*`
+        `🏷️ **Categoria:** ${sugCat}\n📋 **Ideia:** ${sugTitulo}\n📝 **Detalhes:** ${sugDesc}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⬆️ — Apoio esta visão!\n` +
+        `*Vote também em: https://italozkv.github.io/tower-deep/votos.html*`
       );
       await msg.react('⬆️');
-      await interaction.editReply({ content: '🔱 *Tua visão foi gravada nos pergaminhos e aparece no site! Que os deuses decidam seu destino.*' });
+      await interaction.editReply({ content: '🔱 *Tua visão foi gravada nos pergaminhos e já aparece no site!*' });
     } catch (err) {
-      console.error('Erro ao salvar sugestão:', err.message);
-      await interaction.editReply({ content: '⚠️ *Os ventos do Caos interferiram. Tente novamente.*' });
+      console.error('Erro submit sugestao:', err.message, err.stack);
+      try { await interaction.editReply({ content: `⚠️ Erro: ${err.message}` }); } catch(_) {}
     }
     return;
   }
@@ -753,34 +737,27 @@ client.on('interactionCreate', async (interaction) => {
     if (!interaction.member.permissions.has('ManageMessages')) {
       return await interaction.reply({ content: '⚠️ *Apenas guardiões do Olimpo podem proclamar enquetes.*', ephemeral: true });
     }
-    const titulo   = interaction.options.getString('titulo');
+    const titulo    = interaction.options.getString('titulo');
     const descricao = interaction.options.getString('descricao');
     const categoria = interaction.options.getString('categoria');
-    await interaction.reply({ content: '⏳ *Os escribas estão gravando nos pergaminhos...*', ephemeral: true });
+    // deferReply garante que o Discord não timeout enquanto salvamos no Gist
+    await interaction.deferReply({ ephemeral: true });
     try {
       const lista = await lerEnquetes();
-      const novaEnquete = {
-        id: `e${Date.now()}`,
-        titulo, desc: descricao, cat: categoria,
-        votos: 0, origem: 'discord',
-        criadoEm: new Date().toISOString()
-      };
+      const novaEnquete = { id: `e${Date.now()}`, titulo, desc: descricao, cat: categoria, votos: 0, origem: 'discord', criadoEm: new Date().toISOString() };
       lista.push(novaEnquete);
       await salvarEnquetes(lista);
-      // Posta no Discord com reações de voto
       const msg = await interaction.channel.send(
         `🗳️ **NOVA ENQUETE — ${titulo.toUpperCase()}**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `🏷️ **Categoria:** ${categoria}\n` +
-        `📝 ${descricao}\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `⬆️ — Quero esta feature!\n` +
-        `*Resultados visíveis em: https://italozkv.github.io/tower-deep/votos.html*`
+        `🏷️ **Categoria:** ${categoria}\n📝 ${descricao}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⬆️ — Quero esta feature!\n` +
+        `*Resultados: https://italozkv.github.io/tower-deep/votos.html*`
       );
       await msg.react('⬆️');
-      await interaction.editReply({ content: `✅ *Enquete proclamada! Já aparece no site em https://italozkv.github.io/tower-deep/votos.html*` });
+      await interaction.editReply({ content: `✅ *Enquete proclamada e salva no site!*` });
     } catch (err) {
-      console.error('Erro ao criar enquete:', err.message);
-      await interaction.editReply({ content: '⚠️ *Os ventos do Caos interferiram. Tente novamente.*' });
+      console.error('Erro /enquete:', err.message, err.stack);
+      try { await interaction.editReply({ content: `⚠️ Erro: ${err.message}` }); } catch(_) {}
     }
     return;
   }
@@ -795,7 +772,7 @@ client.on('interactionCreate', async (interaction) => {
       });
     }
     const quantidade = interaction.options.getInteger('quantidade');
-    await interaction.reply({ content: `⏳ *Os deuses estão varrendo ${quantidade} mensagens do canal...*`, ephemeral: true });
+    await interaction.deferReply({ ephemeral: true });
     try {
       let apagadas = 0;
       // Discord só permite deletar msgs em lotes de 100 e de até 14 dias
@@ -851,7 +828,7 @@ client.on('interactionCreate', async (interaction) => {
       return await interaction.reply({ content: '⚠️ *Apenas guardiões do Olimpo podem editar os pergaminhos do roadmap.*', ephemeral: true });
     }
     const sub = interaction.options.getSubcommand();
-    await interaction.reply({ content: '⏳ *Consultando os pergaminhos divinos...*', ephemeral: true });
+    await interaction.deferReply({ ephemeral: true });
     try {
       const versoes = await lerRoadmap();
 
