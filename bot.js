@@ -320,15 +320,156 @@ function gerarCodigo() {
   return `${pref}-${rand()}-${rand()}`;
 }
 
+// ─────────────────────────────────────────────────────────────
+// CATÁLOGO DE ITENS DO JOGO (extraído de ItemConfig + SemideusItemConfig)
+// Usado pelo /gencodigo para mostrar lista de itens reais
+// Admin pode adicionar mais com /itemcadastrar
+// ─────────────────────────────────────────────────────────────
 const TIPOS_RECOMPENSA = {
-  moedas:   { emoji: '🪙', label: 'Moedas',         unidade: 'moedas' },
-  gemas:    { emoji: '💎', label: 'Gemas',           unidade: 'gemas'  },
-  xp:       { emoji: '⚡', label: 'XP Bônus',        unidade: 'XP'     },
-  torre:    { emoji: '🏛️', label: 'Torre Exclusiva', unidade: ''       },
-  skin:     { emoji: '🎨', label: 'Skin de Torre',   unidade: ''       },
-  titulo:   { emoji: '📜', label: 'Título/Badge',    unidade: ''       },
-  cosmetico:{ emoji: '✨', label: 'Item Cosmético',  unidade: ''       },
+  moedas:   { emoji: '🪙', label: 'Moedas',         unidade: 'moedas', temLista: false },
+  gemas:    { emoji: '💎', label: 'Gemas',           unidade: 'gemas',  temLista: false },
+  xp:       { emoji: '⚡', label: 'XP Bônus',        unidade: 'XP',     temLista: false },
+  item:     { emoji: '🎁', label: 'Item do Jogo',    unidade: '',       temLista: true  },
 };
+
+// Catálogo fixo extraído dos ItemConfig e SemideusItemConfig do jogo
+// Categorias: Material, Crystal, Essence, Core, Shard, Special, Currency,
+//             Essência, DNA, Cristal, Catalisador, Auxiliar
+const CATALOGO_FIXO = [
+  // ── MATERIAIS BÁSICOS (ItemConfig) ──
+  { id:'gold_coin',          nome:'Moeda de Ouro',              raridade:'Common',    categoria:'Material'    },
+  { id:'tower_shard',        nome:'Fragmento de Torre',         raridade:'Uncommon',  categoria:'Shard'       },
+  { id:'food_crate',         nome:'Caixa de Comida',            raridade:'Common',    categoria:'Material'    },
+  { id:'bone_fragment',      nome:'Fragmento de Osso',          raridade:'Common',    categoria:'Material'    },
+  { id:'iron_ingot',         nome:'Lingote de Ferro',           raridade:'Uncommon',  categoria:'Material'    },
+  { id:'farm_seed',          nome:'Semente Sagrada',            raridade:'Uncommon',  categoria:'Material'    },
+  // ── CRISTAIS (ItemConfig) ──
+  { id:'snow_crystal',       nome:'Cristal de Gelo',            raridade:'Rare',      categoria:'Crystal'     },
+  { id:'thunder_stone',      nome:'Pedra do Trovão',            raridade:'Rare',      categoria:'Crystal'     },
+  { id:'death_crystal',      nome:'Cristal da Morte',           raridade:'Rare',      categoria:'Crystal'     },
+  { id:'rune_crystal',       nome:'Cristal de Runa',            raridade:'Rare',      categoria:'Crystal'     },
+  { id:'sky_essence',        nome:'Essência do Céu',            raridade:'Rare',      categoria:'Crystal'     },
+  // ── ESSÊNCIAS (ItemConfig) ──
+  { id:'shadow_essence',     nome:'Essência Sombria',           raridade:'Epic',      categoria:'Essence'     },
+  { id:'void_fragment',      nome:'Fragmento do Vazio',         raridade:'Epic',      categoria:'Essence'     },
+  // ── NÚCLEOS (ItemConfig) ──
+  { id:'rare_core',          nome:'Núcleo Raro',                raridade:'Rare',      categoria:'Core'        },
+  { id:'legendary_core',     nome:'Núcleo Lendário',            raridade:'Legendary', categoria:'Core'        },
+  { id:'mythic_shard',       nome:'Fragmento Mítico',           raridade:'Mythic',    categoria:'Shard'       },
+  // ── ESPECIAIS (ItemConfig) ──
+  { id:'void_bag',           nome:'Saco do Vazio',              raridade:'Epic',      categoria:'Special'     },
+  { id:'training_manual',    nome:'Manual dos Deuses',          raridade:'Uncommon',  categoria:'Consumable'  },
+  { id:'premium_token',      nome:'Token Divino',               raridade:'Epic',      categoria:'Currency'    },
+  { id:'portal_mistico',     nome:'Portal Místico',             raridade:'Legendary', categoria:'Special'     },
+  // ── ESSÊNCIAS DIVINAS (SemideusItemConfig) ──
+  { id:'essencia_zeus',      nome:'Essência de Zeus',           raridade:'Raro',      categoria:'Essência Grego'   },
+  { id:'essencia_poseidon',  nome:'Essência de Poseidon',       raridade:'Raro',      categoria:'Essência Grego'   },
+  { id:'essencia_ares',      nome:'Essência de Ares',           raridade:'Incomum',   categoria:'Essência Grego'   },
+  { id:'essencia_apolo',     nome:'Essência de Apolo',          raridade:'Incomum',   categoria:'Essência Grego'   },
+  { id:'essencia_hefesto',   nome:'Essência de Hefesto',        raridade:'Raro',      categoria:'Essência Grego'   },
+  { id:'essencia_hecate',    nome:'Essência de Hécate',         raridade:'Epico',     categoria:'Essência Grego'   },
+  { id:'essencia_odin',      nome:'Essência de Odin',           raridade:'Epico',     categoria:'Essência Nórdico' },
+  { id:'essencia_thor',      nome:'Essência de Thor',           raridade:'Raro',      categoria:'Essência Nórdico' },
+  { id:'essencia_freya',     nome:'Essência de Freya',          raridade:'Incomum',   categoria:'Essência Nórdico' },
+  { id:'essencia_loki',      nome:'Essência de Loki',           raridade:'Epico',     categoria:'Essência Nórdico' },
+  { id:'essencia_tyr',       nome:'Essência de Tyr',            raridade:'Raro',      categoria:'Essência Nórdico' },
+  { id:'essencia_heimdall',  nome:'Essência de Heimdall',       raridade:'Incomum',   categoria:'Essência Nórdico' },
+  { id:'essencia_ra',        nome:'Essência de Rá',             raridade:'Epico',     categoria:'Essência Egípcio' },
+  { id:'essencia_anubis',    nome:'Essência de Anubis',         raridade:'Raro',      categoria:'Essência Egípcio' },
+  { id:'essencia_thoth',     nome:'Essência de Thoth',          raridade:'Incomum',   categoria:'Essência Egípcio' },
+  { id:'essencia_bastet',    nome:'Essência de Bastet',         raridade:'Raro',      categoria:'Essência Egípcio' },
+  { id:'essencia_set',       nome:'Essência de Set',            raridade:'Epico',     categoria:'Essência Egípcio' },
+  { id:'essencia_isis',      nome:'Essência de Ísis',           raridade:'Lendario',  categoria:'Essência Egípcio' },
+  { id:'essencia_cronos',    nome:'Essência de Cronos',         raridade:'Lendario',  categoria:'Essência Secreta' },
+  { id:'essencia_caos',      nome:'Essência de Caos',           raridade:'Primordial',categoria:'Essência Secreta' },
+  { id:'essencia_gaia',      nome:'Essência de Gaia',           raridade:'Lendario',  categoria:'Essência Secreta' },
+  { id:'essencia_nyx',       nome:'Essência de Nyx',            raridade:'Primordial',categoria:'Essência Secreta' },
+  { id:'essencia_erebo',     nome:'Essência do Érebo',          raridade:'Lendario',  categoria:'Essência Secreta' },
+  { id:'essencia_tartaro',   nome:'Essência do Tártaro',        raridade:'Lendario',  categoria:'Essência Secreta' },
+  // ── DNA DE CRIATURAS (SemideusItemConfig) ──
+  { id:'dna_goblin',         nome:'DNA de Goblin',              raridade:'Comum',     categoria:'DNA'         },
+  { id:'dna_esqueleto',      nome:'DNA de Esqueleto',           raridade:'Comum',     categoria:'DNA'         },
+  { id:'dna_lobo',           nome:'DNA de Lobo',                raridade:'Comum',     categoria:'DNA'         },
+  { id:'dna_aranha',         nome:'DNA de Aranha',              raridade:'Comum',     categoria:'DNA'         },
+  { id:'dna_harpia',         nome:'DNA de Harpia',              raridade:'Comum',     categoria:'DNA'         },
+  { id:'dna_satiro',         nome:'DNA de Sátiro',              raridade:'Comum',     categoria:'DNA'         },
+  { id:'dna_minotauro',      nome:'DNA de Minotauro',           raridade:'Incomum',   categoria:'DNA'         },
+  { id:'dna_ciclope',        nome:'DNA de Ciclope',             raridade:'Incomum',   categoria:'DNA'         },
+  { id:'dna_gorgona',        nome:'DNA de Górgona',             raridade:'Incomum',   categoria:'DNA'         },
+  { id:'dna_centauro',       nome:'DNA de Centauro',            raridade:'Incomum',   categoria:'DNA'         },
+  { id:'dna_quimera',        nome:'DNA de Quimera',             raridade:'Incomum',   categoria:'DNA'         },
+  { id:'dna_grifo',          nome:'DNA de Grifo',               raridade:'Incomum',   categoria:'DNA'         },
+  { id:'dna_medusa',         nome:'DNA de Medusa',              raridade:'Raro',      categoria:'DNA'         },
+  { id:'dna_hidra',          nome:'DNA de Hidra',               raridade:'Raro',      categoria:'DNA'         },
+  { id:'dna_basilisco',      nome:'DNA de Basilisco',           raridade:'Raro',      categoria:'DNA'         },
+  { id:'dna_escila',         nome:'DNA de Escila',              raridade:'Raro',      categoria:'DNA'         },
+  { id:'dna_esfinge',        nome:'DNA de Esfinge',             raridade:'Raro',      categoria:'DNA'         },
+  { id:'dna_cerbero',        nome:'DNA de Cerbero',             raridade:'Raro',      categoria:'DNA'         },
+  { id:'dna_fenrir',         nome:'DNA de Fenrir',              raridade:'Lendario',  categoria:'DNA Boss'    },
+  { id:'dna_tifao',          nome:'DNA de Tifão',               raridade:'Lendario',  categoria:'DNA Boss'    },
+  { id:'dna_cronos_corrompido',nome:'DNA de Cronos Corrompido', raridade:'Lendario',  categoria:'DNA Boss'    },
+  { id:'dna_leviata',        nome:'DNA de Leviatã',             raridade:'Lendario',  categoria:'DNA Boss'    },
+  { id:'dna_caos_encarnado', nome:'DNA de Caos Encarnado',      raridade:'Primordial',categoria:'DNA Final'   },
+  { id:'dna_nyx_sombria',    nome:'DNA de Nyx Sombria',         raridade:'Primordial',categoria:'DNA Final'   },
+  // ── CRISTAIS DE ALMA (SemideusItemConfig) ──
+  { id:'cristal_guerreiro',  nome:'Cristal Guerreiro',          raridade:'Comum',     categoria:'Cristal Alma'},
+  { id:'cristal_protetor',   nome:'Cristal Protetor',           raridade:'Comum',     categoria:'Cristal Alma'},
+  { id:'cristal_cacador',    nome:'Cristal Caçador',            raridade:'Incomum',   categoria:'Cristal Alma'},
+  { id:'cristal_altruista',  nome:'Cristal Altruísta',          raridade:'Incomum',   categoria:'Cristal Alma'},
+  { id:'cristal_estrategista',nome:'Cristal Estrategista',      raridade:'Raro',      categoria:'Cristal Alma'},
+  { id:'cristal_vingativo',  nome:'Cristal Vingativo',          raridade:'Raro',      categoria:'Cristal Alma'},
+  { id:'cristal_caotico',    nome:'Cristal Caótico',            raridade:'Raro',      categoria:'Cristal Alma'},
+  { id:'cristal_predador',   nome:'Cristal Predador',           raridade:'Epico',     categoria:'Cristal Alma'},
+  { id:'cristal_fantasma',   nome:'Cristal Fantasma',           raridade:'Epico',     categoria:'Cristal Alma'},
+  { id:'cristal_berserker',  nome:'Cristal Berserker',          raridade:'Epico',     categoria:'Cristal Alma'},
+  { id:'cristal_divino',     nome:'Cristal Divino',             raridade:'Lendario',  categoria:'Cristal Alma'},
+  { id:'cristal_vazio',      nome:'Cristal do Vazio',           raridade:'Primordial',categoria:'Cristal Alma'},
+  // ── CATALISADORES (SemideusItemConfig) ──
+  { id:'cat_chama_primordial',nome:'Chama Primordial',          raridade:'Incomum',   categoria:'Catalisador' },
+  { id:'cat_gelo_eterno',    nome:'Gelo Eterno',                raridade:'Incomum',   categoria:'Catalisador' },
+  { id:'cat_raio_puro',      nome:'Raio Puro',                  raridade:'Raro',      categoria:'Catalisador' },
+  { id:'cat_veneno_equidna', nome:'Veneno de Equidna',          raridade:'Raro',      categoria:'Catalisador' },
+  { id:'cat_vento_ciclonico',nome:'Vento Ciclônico',            raridade:'Incomum',   categoria:'Catalisador' },
+  { id:'cat_trevas_erebo',   nome:'Trevas do Érebo',            raridade:'Epico',     categoria:'Catalisador' },
+  { id:'cat_lagrima_tetis',  nome:'Lágrima de Tétis',           raridade:'Raro',      categoria:'Catalisador' },
+  { id:'cat_mel_ambrosia',   nome:'Mel de Ambrosia',            raridade:'Raro',      categoria:'Catalisador' },
+  { id:'cat_agua_estige',    nome:'Água do Estige',             raridade:'Epico',     categoria:'Catalisador' },
+  { id:'cat_areia_cronos',   nome:'Areia de Cronos',            raridade:'Epico',     categoria:'Catalisador' },
+  { id:'cat_sangue_tita',    nome:'Sangue de Titã',             raridade:'Lendario',  categoria:'Catalisador' },
+  { id:'cat_fragmento_caos', nome:'Fragmento do Caos',          raridade:'Lendario',  categoria:'Catalisador' },
+  { id:'cat_ovo_legado',     nome:'Ovo de Legado',              raridade:'Variavel',  categoria:'Catalisador' },
+  { id:'cat_runa_yggdrasil', nome:'Runa de Yggdrasil',          raridade:'Epico',     categoria:'Catalisador' },
+  { id:'cat_olho_horus',     nome:'Olho de Hórus',              raridade:'Lendario',  categoria:'Catalisador' },
+  { id:'cat_chave_tartaro',  nome:'Chave do Tártaro',           raridade:'Primordial',categoria:'Catalisador' },
+  // ── ITENS AUXILIARES (SemideusItemConfig) ──
+  { id:'aux_purificador_divino',nome:'Purificador Divino',      raridade:'Raro',      categoria:'Auxiliar'    },
+  { id:'aux_amplificador_dna',  nome:'Amplificador de DNA',     raridade:'Raro',      categoria:'Auxiliar'    },
+  { id:'aux_estabilizador_alma',nome:'Estabilizador de Alma',   raridade:'Raro',      categoria:'Auxiliar'    },
+  { id:'aux_catalisador_duplo', nome:'Catalisador Duplo',       raridade:'Epico',     categoria:'Auxiliar'    },
+  { id:'aux_extrator_dna',      nome:'Extrator de DNA',         raridade:'Raro',      categoria:'Auxiliar'    },
+  { id:'aux_copiador_essencia', nome:'Copiador de Essência',    raridade:'Epico',     categoria:'Auxiliar'    },
+  { id:'aux_preservador_legado',nome:'Preservador de Legado',   raridade:'Raro',      categoria:'Auxiliar'    },
+  { id:'aux_tomo_combinacoes',  nome:'Tomo de Combinações',     raridade:'Lendario',  categoria:'Auxiliar'    },
+];
+
+const RARIDADE_EMOJI = {
+  Common:'⚪', Uncommon:'🟢', Rare:'🔵', Epic:'🟣', Legendary:'🟡', Mythic:'🔴',
+  Comum:'⚪',  Incomum:'🟢',  Raro:'🔵', Epico:'🟣', Lendario:'🟡', Primordial:'💀', Variavel:'⬜',
+};
+
+// Helper — retorna lista de itens do catálogo (fixos + cadastrados) filtrados por categoria
+async function getCatalogoCompleto() {
+  const db = await lerCodigos();
+  const extras = db.itensExtras || [];
+  return [...CATALOGO_FIXO, ...extras];
+}
+
+// Helper — formata item para exibição no Discord
+function formatarItem(item, qtd = 1) {
+  const emoji = RARIDADE_EMOJI[item.raridade] || '🎁';
+  const qtdStr = qtd > 1 ? ` x${qtd}` : '';
+  return `${emoji} **${item.nome}**${qtdStr} *(${item.raridade} — ${item.categoria})*`;
+}
 
 // Sessões de criação de código por admin
 const sessoescodigo = new Map();
@@ -1356,12 +1497,126 @@ const slashCommands = [
     .setName('minhaconta')
     .setDescription('👤 Ver sua conta Roblox vinculada e códigos resgatados'),
 
+  new SlashCommandBuilder()
+    .setName('itemcadastrar')
+    .setDescription('➕ Cadastrar novo item no catálogo de recompensas (Admin)'),
+
+  new SlashCommandBuilder()
+    .setName('itemlistar')
+    .setDescription('📦 Ver todos os itens do catálogo por categoria (Admin)'),
+
 ].map(cmd => cmd.toJSON());
 
 async function registrarSlashCommands(clientId) {
   const rest = new REST({ version: '10' }).setToken(CONFIG.DISCORD_TOKEN);
   try { await rest.put(Routes.applicationCommands(clientId), { body: slashCommands }); console.log('✅ Slash commands registrados!'); }
   catch (err) { console.error('Erro ao registrar slash commands:', err.message); }
+}
+
+
+// Helper do /gencodigo — avança para o próximo tipo ou finaliza e gera código
+async function avancarRecompensa(interaction, sessao, adminId) {
+  const proxIdx = sessao.tiposIdx;
+
+  if (proxIdx < sessao.tiposSelecionados.length) {
+    const proxTipo = sessao.tiposSelecionados[proxIdx];
+
+    if (proxTipo === 'item') {
+      // Mostrar seletor de categoria
+      const catalogo   = await getCatalogoCompleto();
+      const categorias = [...new Set(catalogo.map(i => i.categoria))].sort();
+      const opsCat = categorias.slice(0, 25).map(c => ({
+        label: c, value: `cat:${c}`,
+        description: `${catalogo.filter(i => i.categoria === c).length} itens`,
+      }));
+      const menuCat = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`gc_cat_${adminId}`)
+          .setPlaceholder('📂 Escolha a categoria do próximo item...')
+          .addOptions(opsCat)
+      );
+      const recompListadas = sessao.recompensas.map(r => r.label).join('\n');
+      return interaction.editReply({
+        embeds: [new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA)
+          .setTitle(`🎁 Recompensa ${proxIdx + 1}/${sessao.tiposSelecionados.length}`)
+          .setDescription(`*Já adicionadas:*\n${recompListadas}\n\n*Selecione a categoria do próximo item:*`)],
+        components: [menuCat],
+      });
+    } else {
+      // Pedir quantidade via modal
+      const info = TIPOS_RECOMPENSA[proxTipo];
+      const modal = new ModalBuilder()
+        .setCustomId(`gc_qtd_${adminId}_${proxIdx}`)
+        .setTitle(`Recompensa ${proxIdx + 1}: ${info.label}`)
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('valor').setLabel(`Quantidade de ${info.unidade}`)
+              .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 500')
+          )
+        );
+      return interaction.showModal(modal);
+    }
+  }
+
+  // TODAS as recompensas coletadas — gerar o código!
+  try {
+    const codigo = gerarCodigo();
+    const db     = await lerCodigos();
+    const expira = sessao.expiraHoras ? new Date(Date.now() + sessao.expiraHoras * 3600000).toISOString() : null;
+    db.codigos.push({
+      id: codigo, descricao: sessao.descricao, recompensas: sessao.recompensas,
+      criadoPor: interaction.user.tag, criadoEm: new Date().toISOString(),
+      expira, maxUsos: sessao.maxUsos, usadoPor: [], ativo: true,
+    });
+    await salvarCodigos(db);
+    invalidarCache();
+    sessoescodigo.delete(interaction.user.id);
+
+    const embedConf = new EmbedBuilder()
+      .setColor(CONFIG.CORES.SUCESSO)
+      .setTitle('✅ Código Gerado!')
+      .addFields(
+        { name: '🎁 Código',      value: '`' + codigo + '`',                                                 inline: false },
+        { name: '📝 Descrição',   value: sessao.descricao,                                                   inline: true  },
+        { name: '👥 Max Usos',    value: sessao.maxUsos ? String(sessao.maxUsos) : 'Ilimitado',              inline: true  },
+        { name: '⏰ Expira',       value: expira ? new Date(expira).toLocaleDateString('pt-BR') : 'Nunca',   inline: true  },
+        { name: '🎀 Recompensas', value: sessao.recompensas.map(r => r.label).join('\n'),                  inline: false },
+      )
+      .setFooter({ text: 'Anunciado no canal de códigos' });
+    await interaction.editReply({ embeds: [embedConf], components: [] });
+
+    // Anúncio público
+    const guild = interaction.guild;
+    const canalCodigos = CONFIG.CANAL_CODIGOS
+      ? guild?.channels?.cache?.get(CONFIG.CANAL_CODIGOS)
+      : interaction.channel;
+
+    if (canalCodigos) {
+      const embedAnuncio = new EmbedBuilder()
+        .setColor(CONFIG.CORES.PRIMARIA)
+        .setTitle('🎁 NOVO CÓDIGO DE RESGATE!')
+        .setDescription(`*Os deuses do Olimpo presenteiam os mortais dedicados!*\n\n📜 **${sessao.descricao}**`)
+        .addFields(
+          { name: '🔑 Código',      value: '## `' + codigo + '`',                                            inline: false },
+          { name: '🎀 Recompensas', value: sessao.recompensas.map(r => r.label).join('\n'),                 inline: false },
+          { name: '👥 Usos',        value: sessao.maxUsos ? `${sessao.maxUsos} usos` : 'Ilimitado',          inline: true  },
+          { name: '⏰ Válido até',  value: expira ? new Date(expira).toLocaleDateString('pt-BR') : 'Sem prazo', inline: true },
+        )
+        .addFields({ name: '📖 Como resgatar?', value: 'Abra o jogo → Configurações → Código de Resgate!' })
+        .setFooter({ text: 'Tower Deep · Código válido 1x por conta Roblox' })
+        .setTimestamp();
+
+      const btns = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setLabel('🎮 Jogar Agora').setStyle(ButtonStyle.Link).setURL('https://www.roblox.com/games/'),
+        new ButtonBuilder().setLabel('🔗 Vincular Conta').setStyle(ButtonStyle.Primary).setCustomId('btn_vincular_info'),
+      );
+      await canalCodigos.send({ content: '@everyone', embeds: [embedAnuncio], components: [btns] });
+    }
+  } catch (err) {
+    console.error('Erro ao gerar código:', err.message);
+    await interaction.editReply({ content: '⚠️ Erro ao salvar código. Tente novamente.', components: [] });
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1755,174 +2010,228 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
     // /gencodigo — gerar código de resgate (Admin)
     if (interaction.isChatInputCommand() && interaction.commandName === 'gencodigo') {
       if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫 *Apenas Admins podem gerar códigos.*', ephemeral: true });
-
       const descricao   = interaction.options.getString('descricao');
-      const maxUsos     = interaction.options.getInteger('maxusos') || 0; // 0 = ilimitado
+      const maxUsos     = interaction.options.getInteger('maxusos') || 0;
       const expiraHoras = interaction.options.getInteger('expira_horas') || 0;
-
-      // Seletor de recompensas
-      const menuRecompensas = new ActionRowBuilder().addComponents(
+      sessoescodigo.set(interaction.user.id, { descricao, maxUsos, expiraHoras, recompensas: [], tiposIdx: 0, step: 'tipo' });
+      setTimeout(() => sessoescodigo.delete(interaction.user.id), 10 * 60 * 1000);
+      const menuTipo = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
-          .setCustomId(`gencodigo_recomp_${interaction.user.id}`)
-          .setPlaceholder('🎁 Selecione as recompensas do código...')
-          .setMinValues(1).setMaxValues(7)
-          .addOptions(Object.entries(TIPOS_RECOMPENSA).map(([val, r]) => ({
-            label: r.label, value: val, emoji: r.emoji,
-            description: `Adicionar ${r.label} como recompensa`,
-          })))
+          .setCustomId(`gc_tipo_${interaction.user.id}`)
+          .setPlaceholder('🎁 Que tipos de recompensa este código vai dar?')
+          .setMinValues(1).setMaxValues(3)
+          .addOptions([
+            { label: 'Moedas',       value: 'moedas', emoji: '🪙', description: 'Moedas do jogo' },
+            { label: 'Gemas',        value: 'gemas',  emoji: '💎', description: 'Gemas premium' },
+            { label: 'XP Bônus',     value: 'xp',     emoji: '⚡', description: 'Experiência extra' },
+            { label: 'Item do Jogo', value: 'item',   emoji: '🎁', description: 'Item real do catálogo (104 itens disponíveis)' },
+          ])
       );
-
-      // Salva sessão temporária
-      sessoescodigo.set(interaction.user.id, { descricao, maxUsos, expiraHoras, step: 'recompensas' });
-      setTimeout(() => sessoescodigo.delete(interaction.user.id), 5 * 60 * 1000);
-
       const embed = new EmbedBuilder()
         .setColor(CONFIG.CORES.PRIMARIA)
-        .setTitle('🎁 Novo Código de Resgate')
-        .setDescription(`**Descrição:** ${descricao}
-**Max Usos:** ${maxUsos || 'Ilimitado'}
-**Expira:** ${expiraHoras ? `em ${expiraHoras}h` : 'Nunca'}
-
-*Seleciona as recompensas que este código vai conceder:*`)
-        .setFooter({ text: 'Passo 1/2 — Selecionar Recompensas' });
-
-      return interaction.reply({ embeds: [embed], components: [menuRecompensas], ephemeral: true });
+        .setTitle('🎁 Novo Código — Passo 1/3')
+        .setDescription(`**Descrição:** ${descricao}\n**Max Usos:** ${maxUsos || 'Ilimitado'} · **Expira:** ${expiraHoras ? `em ${expiraHoras}h` : 'Nunca'}\n\n*Selecione os tipos de recompensa:*`)
+        .setFooter({ text: 'Passo 1 — Tipo de Recompensa' });
+      return interaction.reply({ embeds: [embed], components: [menuTipo], ephemeral: true });
     }
 
-    // Select menu — escolha de recompensas do /gencodigo
-    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('gencodigo_recomp_')) {
-      const adminId = interaction.customId.split('_')[2];
+    // Passo 1 → Tipos selecionados
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('gc_tipo_')) {
+      const adminId = interaction.customId.split('gc_tipo_')[1];
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
-
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada. Use /gencodigo novamente.', ephemeral: true });
+      sessao.tiposSelecionados = interaction.values;
+      sessao.tiposIdx = 0;
+      await interaction.deferUpdate();
+      return await avancarRecompensa(interaction, sessao, adminId);
+    }
 
-      const tiposSelecionados = interaction.values;
-      sessao.tiposSelecionados = tiposSelecionados;
-      sessao.step = 'valores';
-      sessao.valoresIdx = 0;
-      sessao.recompensas = [];
+    // Passo 2 → Categoria selecionada → listar itens
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('gc_cat_')) {
+      const adminId = interaction.customId.split('gc_cat_')[1];
+      if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
+      const sessao = sessoescodigo.get(interaction.user.id);
+      if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
+      const categoria = interaction.values[0].replace('cat:', '');
+      const catalogo  = await getCatalogoCompleto();
+      const itensCat  = catalogo.filter(i => i.categoria === categoria).slice(0, 25);
+      const opsItens  = itensCat.map(i => ({
+        label: i.nome.slice(0, 100), value: i.id,
+        description: `${i.raridade} · ${i.id}`,
+        emoji: RARIDADE_EMOJI[i.raridade] || '🎁',
+      }));
+      const menuItem = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`gc_item_${adminId}`)
+          .setPlaceholder(`🎁 Selecione um item de "${categoria}"...`)
+          .addOptions(opsItens)
+      );
+      const btnVoltar = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`gc_voltarcat_${adminId}`).setLabel('← Voltar às Categorias').setStyle(ButtonStyle.Secondary)
+      );
+      return interaction.update({
+        embeds: [new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA)
+          .setTitle(`📂 ${categoria}`)
+          .setDescription(`*${itensCat.length} itens — selecione um:*`)
+          .setFooter({ text: 'Passo 2b — Item' })],
+        components: [menuItem, btnVoltar],
+      });
+    }
 
-      // Para recompensas de quantidade (moedas, gemas, xp) pede valor
-      // Para itens (torre, skin, titulo, cosmetico) pede nome do item
-      const tipo = tiposSelecionados[0];
-      const info = TIPOS_RECOMPENSA[tipo];
+    // Passo 2b → Item selecionado → pedir quantidade
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('gc_item_')) {
+      const adminId = interaction.customId.split('gc_item_')[1];
+      if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
+      const sessao = sessoescodigo.get(interaction.user.id);
+      if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
+      const catalogo = await getCatalogoCompleto();
+      const item = catalogo.find(i => i.id === interaction.values[0]);
+      if (!item) return interaction.reply({ content: '❌ Item não encontrado.', ephemeral: true });
+      sessao.itemAtual = item;
       const modal = new ModalBuilder()
-        .setCustomId(`gencodigo_valor_${interaction.user.id}_0`)
-        .setTitle(`Recompensa: ${info.label}`)
+        .setCustomId(`gc_qtditem_${adminId}`)
+        .setTitle(`Quantidade: ${item.nome.slice(0, 40)}`)
+        .addComponents(new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId('valor').setLabel('Quantidade (1 se for único)')
+            .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 1')
+        ));
+      return interaction.showModal(modal);
+    }
+
+    // Modal → quantidade de item do catálogo
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('gc_qtditem_')) {
+      const adminId = interaction.customId.split('gc_qtditem_')[1];
+      if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
+      const sessao = sessoescodigo.get(interaction.user.id);
+      if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
+      await interaction.deferUpdate();
+      const qtd  = parseInt(interaction.fields.getTextInputValue('valor')) || 1;
+      const item = sessao.itemAtual;
+      const emoji = RARIDADE_EMOJI[item.raridade] || '🎁';
+      sessao.recompensas.push({ tipo: 'item', valor: item.id, quantidade: qtd, label: `${emoji} ${item.nome}${qtd > 1 ? ` x${qtd}` : ''} *(${item.raridade})*` });
+      sessao.tiposIdx++;
+      return await avancarRecompensa(interaction, sessao, adminId);
+    }
+
+    // Modal → quantidade de moedas/gemas/xp
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('gc_qtd_')) {
+      const parts   = interaction.customId.split('_');
+      const adminId = parts[2];
+      if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
+      const sessao = sessoescodigo.get(interaction.user.id);
+      if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
+      await interaction.deferUpdate();
+      const tipo  = sessao.tiposSelecionados[sessao.tiposIdx];
+      const info  = TIPOS_RECOMPENSA[tipo];
+      const valor = parseInt(interaction.fields.getTextInputValue('valor')) || 0;
+      sessao.recompensas.push({ tipo, valor, quantidade: valor, label: `${info.emoji} ${info.label}: ${valor} ${info.unidade}` });
+      sessao.tiposIdx++;
+      return await avancarRecompensa(interaction, sessao, adminId);
+    }
+
+    // Botão voltar às categorias
+    if (interaction.isButton() && interaction.customId.startsWith('gc_voltarcat_')) {
+      const adminId = interaction.customId.split('gc_voltarcat_')[1];
+      if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
+      const sessao = sessoescodigo.get(interaction.user.id);
+      if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
+      const catalogo   = await getCatalogoCompleto();
+      const categorias = [...new Set(catalogo.map(i => i.categoria))].sort();
+      const opsCat = categorias.slice(0, 25).map(c => ({
+        label: c, value: `cat:${c}`, description: `${catalogo.filter(i => i.categoria === c).length} itens`,
+      }));
+      return interaction.update({
+        embeds: [new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA).setTitle('📂 Categorias').setDescription('*Selecione a categoria:*')],
+        components: [new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder().setCustomId(`gc_cat_${adminId}`).setPlaceholder('📂 Categoria...').addOptions(opsCat)
+        )],
+      });
+    }
+
+    // /itemcadastrar — Admin cadastra item novo no catálogo
+    if (interaction.isChatInputCommand() && interaction.commandName === 'itemcadastrar') {
+      if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫 Apenas Admins.', ephemeral: true });
+      const modal = new ModalBuilder()
+        .setCustomId('itemcadastrar_modal')
+        .setTitle('Cadastrar Novo Item')
         .addComponents(
           new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId('valor')
-              .setLabel(['moedas','gemas','xp'].includes(tipo) ? `Quantidade de ${info.unidade}` : `Nome do item (${info.label})`)
-              .setStyle(TextInputStyle.Short)
-              .setRequired(true)
-              .setPlaceholder(['moedas','gemas','xp'].includes(tipo) ? 'Ex: 500' : 'Ex: Torre Zeus Lendária')
+            new TextInputBuilder().setCustomId('id').setLabel('ID do item (sem espaços, ex: espada_zeus)')
+              .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('espada_zeus')
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('nome').setLabel('Nome de exibição')
+              .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Espada de Zeus')
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('raridade').setLabel('Raridade')
+              .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Comum / Incomum / Raro / Epico / Lendario / Primordial')
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('categoria').setLabel('Categoria (ex: Arma, Especial, Skin...)')
+              .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Arma'  )
           )
         );
       return interaction.showModal(modal);
     }
 
-    // Modal — valor da recompensa do /gencodigo
-    if (interaction.isModalSubmit() && interaction.customId.startsWith('gencodigo_valor_')) {
-      const parts   = interaction.customId.split('_');
-      const adminId = parts[2];
-      const idx     = parseInt(parts[3]);
-      if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
+    // Modal — confirmar cadastro de item
+    if (interaction.isModalSubmit() && interaction.customId === 'itemcadastrar_modal') {
+      if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫', ephemeral: true });
+      await interaction.deferReply({ ephemeral: true });
+      const id        = interaction.fields.getTextInputValue('id').trim().toLowerCase().replace(/\s+/g, '_');
+      const nome      = interaction.fields.getTextInputValue('nome').trim();
+      const raridade  = interaction.fields.getTextInputValue('raridade').trim();
+      const categoria = interaction.fields.getTextInputValue('categoria').trim();
 
-      const sessao = sessoescodigo.get(interaction.user.id);
-      if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
-
-      const valorRaw = interaction.fields.getTextInputValue('valor');
-      const tipo     = sessao.tiposSelecionados[idx];
-      const info     = TIPOS_RECOMPENSA[tipo];
-      const valor    = ['moedas','gemas','xp'].includes(tipo) ? (parseInt(valorRaw) || 0) : valorRaw;
-      sessao.recompensas.push({ tipo, valor, label: `${info.emoji} ${info.label}: ${valor}${info.unidade ? ' '+info.unidade : ''}` });
-
-      // Próxima recompensa?
-      const proxIdx = idx + 1;
-      if (proxIdx < sessao.tiposSelecionados.length) {
-        const proxTipo = sessao.tiposSelecionados[proxIdx];
-        const proxInfo = TIPOS_RECOMPENSA[proxTipo];
-        const modal2 = new ModalBuilder()
-          .setCustomId(`gencodigo_valor_${interaction.user.id}_${proxIdx}`)
-          .setTitle(`Recompensa ${proxIdx+1}/${sessao.tiposSelecionados.length}: ${proxInfo.label}`)
-          .addComponents(
-            new ActionRowBuilder().addComponents(
-              new TextInputBuilder()
-                .setCustomId('valor')
-                .setLabel(['moedas','gemas','xp'].includes(proxTipo) ? `Quantidade de ${proxInfo.unidade}` : `Nome do item`)
-                .setStyle(TextInputStyle.Short).setRequired(true)
-                .setPlaceholder(['moedas','gemas','xp'].includes(proxTipo) ? 'Ex: 1000' : 'Ex: Skin Olimpo')
-            )
-          );
-        return interaction.showModal(modal2);
+      // Validar id único
+      const catalogo = await getCatalogoCompleto();
+      if (catalogo.find(i => i.id === id)) {
+        return interaction.editReply({ content: `❌ Já existe um item com o ID \`${id}\`. Use outro ID.` });
       }
 
-      // Todas as recompensas coletadas — gerar o código!
-      await interaction.deferUpdate();
-      try {
-        const codigo = gerarCodigo();
-        const db     = await lerCodigos();
-        const expira = sessao.expiraHoras ? new Date(Date.now() + sessao.expiraHoras * 3600000).toISOString() : null;
-        db.codigos.push({
-          id: codigo, descricao: sessao.descricao, recompensas: sessao.recompensas,
-          criadoPor: interaction.user.tag, criadoEm: new Date().toISOString(),
-          expira, maxUsos: sessao.maxUsos, usadoPor: [], ativo: true,
-        });
-        await salvarCodigos(db);
-        invalidarCache();
-        sessoescodigo.delete(interaction.user.id);
+      const novoItem = { id, nome, raridade, categoria, adicionadoPor: interaction.user.tag, adicionadoEm: new Date().toISOString() };
+      const db = await lerCodigos();
+      if (!db.itensExtras) db.itensExtras = [];
+      db.itensExtras.push(novoItem);
+      await salvarCodigos(db);
+      invalidarCache();
 
-        // Embed de confirmação privado para o admin
-        const embedConf = new EmbedBuilder()
+      const emoji = RARIDADE_EMOJI[raridade] || '🎁';
+      return interaction.editReply({
+        embeds: [new EmbedBuilder()
           .setColor(CONFIG.CORES.SUCESSO)
-          .setTitle('✅ Código Gerado!')
+          .setTitle('✅ Item Cadastrado!')
+          .setDescription(`${emoji} **${nome}** foi adicionado ao catálogo e já aparece no /gencodigo.`)
           .addFields(
-            { name: '🎁 Código',       value: `\`${codigo}\``,                                                   inline: false },
-            { name: '📝 Descrição',    value: sessao.descricao,                                                   inline: true  },
-            { name: '👥 Max Usos',     value: sessao.maxUsos ? String(sessao.maxUsos) : 'Ilimitado',              inline: true  },
-            { name: '⏰ Expira',        value: expira ? new Date(expira).toLocaleDateString('pt-BR') : 'Nunca',   inline: true  },
-            { name: '🎀 Recompensas',  value: sessao.recompensas.map(r => r.label).join('\n'),                   inline: false },
+            { name: 'ID',        value: `\`${id}\``, inline: true },
+            { name: 'Raridade',  value: raridade,    inline: true },
+            { name: 'Categoria', value: categoria,   inline: true },
+          )],
+      });
+    }
 
-          )
-          .setFooter({ text: 'O código foi anunciado no canal de códigos' });
-        await interaction.editReply({ embeds: [embedConf], components: [] });
-
-        // Anúncio público no canal de códigos
-        const canalCodigos = CONFIG.CANAL_CODIGOS
-          ? interaction.guild?.channels?.cache?.get(CONFIG.CANAL_CODIGOS)
-          : interaction.channel;
-
-        if (canalCodigos) {
-          const embedAnuncio = new EmbedBuilder()
-            .setColor(CONFIG.CORES.PRIMARIA)
-            .setTitle('🎁 NOVO CÓDIGO DE RESGATE!')
-            .setDescription(`*Os deuses do Olimpo presenteiam os mortais dedicados!*
-
-📜 **${sessao.descricao}**`)
-            .addFields(
-              { name: '🔑 Código',      value: `## \`${codigo}\``,                                              inline: false },
-              { name: '🎀 Recompensas', value: sessao.recompensas.map(r => r.label).join('\n'),                 inline: false },
-
-              { name: '👥 Usos',        value: sessao.maxUsos ? `${sessao.maxUsos} usos disponíveis` : 'Ilimitado', inline: true },
-              { name: '⏰ Válido até',  value: expira ? new Date(expira).toLocaleDateString('pt-BR') : 'Sem prazo', inline: true },
-            )
-            .addFields({ name: '\U0001f4d6 Como resgatar?', value: 'Abra o jogo → Menu de Códigos → Cole o código acima!\n*É necessário ter a conta Roblox vinculada com /vincular.*' })
-            .setFooter({ text: 'Tower Deep · Código válido 1x por conta Roblox' })
-            .setTimestamp();
-
-          const botoesAnuncio = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setLabel('🎮 Jogar Agora').setStyle(ButtonStyle.Link).setURL('https://www.roblox.com/games/'),
-            new ButtonBuilder().setLabel('🔗 Vincular Conta').setStyle(ButtonStyle.Primary).setCustomId('btn_vincular_info'),
-          );
-          await canalCodigos.send({ content: '@everyone', embeds: [embedAnuncio], components: [botoesAnuncio] });
-        }
-      } catch (err) {
-        console.error('Erro ao gerar código:', err.message);
-        await interaction.editReply({ content: '⚠️ Erro ao salvar código. Tente novamente.', components: [] });
-      }
-      return;
+    // /itemlistar — listar itens do catálogo (Admin)
+    if (interaction.isChatInputCommand() && interaction.commandName === 'itemlistar') {
+      if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫 Apenas Admins.', ephemeral: true });
+      await interaction.deferReply({ ephemeral: true });
+      const catalogo = await getCatalogoCompleto();
+      const db = await lerCodigos();
+      const extras = db.itensExtras || [];
+      const categorias = [...new Set(catalogo.map(i => i.categoria))].sort();
+      const resumo = categorias.map(c => {
+        const count = catalogo.filter(i => i.categoria === c).length;
+        return `**${c}** — ${count} iten${count !== 1 ? 's' : ''}`;
+      }).join('\n');
+      return interaction.editReply({
+        embeds: [new EmbedBuilder()
+          .setColor(CONFIG.CORES.INFO)
+          .setTitle(`📦 Catálogo de Itens — ${catalogo.length} itens`)
+          .setDescription(resumo)
+          .addFields({ name: '➕ Itens extras cadastrados', value: extras.length ? `${extras.length} iten${extras.length !== 1 ? 's' : ''} adicionados por admins` : 'Nenhum ainda. Use /itemcadastrar.' })
+          .setFooter({ text: 'Use /itemcadastrar para adicionar novos itens' })],
+      });
     }
 
     // Botão — info de vincular
