@@ -18,6 +18,8 @@ const {
 } = require('discord.js');
 const https = require('https');
 const http  = require('http');  // ← servidor de tokens
+const fs = require('fs');
+const path = require('path');
 
 // ─────────────────────────────────────────────────────────────
 // CONFIG
@@ -326,131 +328,140 @@ function gerarCodigo() {
 // Admin pode adicionar mais com /itemcadastrar
 // ─────────────────────────────────────────────────────────────
 const TIPOS_RECOMPENSA = {
-  moedas:   { emoji: '🪙', label: 'Moedas',         unidade: 'moedas', temLista: false },
-  gemas:    { emoji: '💎', label: 'Gemas',           unidade: 'gemas',  temLista: false },
-  xp:       { emoji: '⚡', label: 'XP Bônus',        unidade: 'XP',     temLista: false },
-  item:     { emoji: '🎁', label: 'Item do Jogo',    unidade: '',       temLista: true  },
+  moedas:        { emoji: '🪙', label: 'GodCoins',      unidade: 'GodCoins',    temLista: false },
+  gemas:         { emoji: '💎', label: 'Gems',          unidade: 'Gems',        temLista: false },
+  xp:            { emoji: '⚡', label: 'XP Bônus',      unidade: 'XP',          temLista: false },
+  presents:      { emoji: '🎁', label: 'Presents',      unidade: 'Presents',    temLista: false },
+  favor_greek:   { emoji: '🏛️', label: 'Favor Grego',   unidade: 'Favor',       temLista: false },
+  favor_norse:   { emoji: '🛡️', label: 'Favor Nórdico', unidade: 'Favor',       temLista: false },
+  favor_egyptian:{ emoji: '𓂀', label: 'Favor Egípcio', unidade: 'Favor',       temLista: false },
+  item:          { emoji: '🎁', label: 'Item do Jogo', unidade: '',            temLista: true  },
 };
 
-// Catálogo fixo extraído dos ItemConfig e SemideusItemConfig do jogo
-// Categorias: Material, Crystal, Essence, Core, Shard, Special, Currency,
-//             Essência, DNA, Cristal, Catalisador, Auxiliar
-const CATALOGO_FIXO = [
-  // ── MATERIAIS BÁSICOS (ItemConfig) ──
-  { id:'gold_coin',          nome:'Moeda de Ouro',              raridade:'Common',    categoria:'Material'    },
-  { id:'tower_shard',        nome:'Fragmento de Torre',         raridade:'Uncommon',  categoria:'Shard'       },
-  { id:'food_crate',         nome:'Caixa de Comida',            raridade:'Common',    categoria:'Material'    },
-  { id:'bone_fragment',      nome:'Fragmento de Osso',          raridade:'Common',    categoria:'Material'    },
-  { id:'iron_ingot',         nome:'Lingote de Ferro',           raridade:'Uncommon',  categoria:'Material'    },
-  { id:'farm_seed',          nome:'Semente Sagrada',            raridade:'Uncommon',  categoria:'Material'    },
-  // ── CRISTAIS (ItemConfig) ──
-  { id:'snow_crystal',       nome:'Cristal de Gelo',            raridade:'Rare',      categoria:'Crystal'     },
-  { id:'thunder_stone',      nome:'Pedra do Trovão',            raridade:'Rare',      categoria:'Crystal'     },
-  { id:'death_crystal',      nome:'Cristal da Morte',           raridade:'Rare',      categoria:'Crystal'     },
-  { id:'rune_crystal',       nome:'Cristal de Runa',            raridade:'Rare',      categoria:'Crystal'     },
-  { id:'sky_essence',        nome:'Essência do Céu',            raridade:'Rare',      categoria:'Crystal'     },
-  // ── ESSÊNCIAS (ItemConfig) ──
-  { id:'shadow_essence',     nome:'Essência Sombria',           raridade:'Epic',      categoria:'Essence'     },
-  { id:'void_fragment',      nome:'Fragmento do Vazio',         raridade:'Epic',      categoria:'Essence'     },
-  // ── NÚCLEOS (ItemConfig) ──
-  { id:'rare_core',          nome:'Núcleo Raro',                raridade:'Rare',      categoria:'Core'        },
-  { id:'legendary_core',     nome:'Núcleo Lendário',            raridade:'Legendary', categoria:'Core'        },
-  { id:'mythic_shard',       nome:'Fragmento Mítico',           raridade:'Mythic',    categoria:'Shard'       },
-  // ── ESPECIAIS (ItemConfig) ──
-  { id:'void_bag',           nome:'Saco do Vazio',              raridade:'Epic',      categoria:'Special'     },
-  { id:'training_manual',    nome:'Manual dos Deuses',          raridade:'Uncommon',  categoria:'Consumable'  },
-  { id:'premium_token',      nome:'Token Divino',               raridade:'Epic',      categoria:'Currency'    },
-  { id:'portal_mistico',     nome:'Portal Místico',             raridade:'Legendary', categoria:'Special'     },
-  // ── ESSÊNCIAS DIVINAS (SemideusItemConfig) ──
-  { id:'essencia_zeus',      nome:'Essência de Zeus',           raridade:'Raro',      categoria:'Essência Grego'   },
-  { id:'essencia_poseidon',  nome:'Essência de Poseidon',       raridade:'Raro',      categoria:'Essência Grego'   },
-  { id:'essencia_ares',      nome:'Essência de Ares',           raridade:'Incomum',   categoria:'Essência Grego'   },
-  { id:'essencia_apolo',     nome:'Essência de Apolo',          raridade:'Incomum',   categoria:'Essência Grego'   },
-  { id:'essencia_hefesto',   nome:'Essência de Hefesto',        raridade:'Raro',      categoria:'Essência Grego'   },
-  { id:'essencia_hecate',    nome:'Essência de Hécate',         raridade:'Epico',     categoria:'Essência Grego'   },
-  { id:'essencia_odin',      nome:'Essência de Odin',           raridade:'Epico',     categoria:'Essência Nórdico' },
-  { id:'essencia_thor',      nome:'Essência de Thor',           raridade:'Raro',      categoria:'Essência Nórdico' },
-  { id:'essencia_freya',     nome:'Essência de Freya',          raridade:'Incomum',   categoria:'Essência Nórdico' },
-  { id:'essencia_loki',      nome:'Essência de Loki',           raridade:'Epico',     categoria:'Essência Nórdico' },
-  { id:'essencia_tyr',       nome:'Essência de Tyr',            raridade:'Raro',      categoria:'Essência Nórdico' },
-  { id:'essencia_heimdall',  nome:'Essência de Heimdall',       raridade:'Incomum',   categoria:'Essência Nórdico' },
-  { id:'essencia_ra',        nome:'Essência de Rá',             raridade:'Epico',     categoria:'Essência Egípcio' },
-  { id:'essencia_anubis',    nome:'Essência de Anubis',         raridade:'Raro',      categoria:'Essência Egípcio' },
-  { id:'essencia_thoth',     nome:'Essência de Thoth',          raridade:'Incomum',   categoria:'Essência Egípcio' },
-  { id:'essencia_bastet',    nome:'Essência de Bastet',         raridade:'Raro',      categoria:'Essência Egípcio' },
-  { id:'essencia_set',       nome:'Essência de Set',            raridade:'Epico',     categoria:'Essência Egípcio' },
-  { id:'essencia_isis',      nome:'Essência de Ísis',           raridade:'Lendario',  categoria:'Essência Egípcio' },
-  { id:'essencia_cronos',    nome:'Essência de Cronos',         raridade:'Lendario',  categoria:'Essência Secreta' },
-  { id:'essencia_caos',      nome:'Essência de Caos',           raridade:'Primordial',categoria:'Essência Secreta' },
-  { id:'essencia_gaia',      nome:'Essência de Gaia',           raridade:'Lendario',  categoria:'Essência Secreta' },
-  { id:'essencia_nyx',       nome:'Essência de Nyx',            raridade:'Primordial',categoria:'Essência Secreta' },
-  { id:'essencia_erebo',     nome:'Essência do Érebo',          raridade:'Lendario',  categoria:'Essência Secreta' },
-  { id:'essencia_tartaro',   nome:'Essência do Tártaro',        raridade:'Lendario',  categoria:'Essência Secreta' },
-  // ── DNA DE CRIATURAS (SemideusItemConfig) ──
-  { id:'dna_goblin',         nome:'DNA de Goblin',              raridade:'Comum',     categoria:'DNA'         },
-  { id:'dna_esqueleto',      nome:'DNA de Esqueleto',           raridade:'Comum',     categoria:'DNA'         },
-  { id:'dna_lobo',           nome:'DNA de Lobo',                raridade:'Comum',     categoria:'DNA'         },
-  { id:'dna_aranha',         nome:'DNA de Aranha',              raridade:'Comum',     categoria:'DNA'         },
-  { id:'dna_harpia',         nome:'DNA de Harpia',              raridade:'Comum',     categoria:'DNA'         },
-  { id:'dna_satiro',         nome:'DNA de Sátiro',              raridade:'Comum',     categoria:'DNA'         },
-  { id:'dna_minotauro',      nome:'DNA de Minotauro',           raridade:'Incomum',   categoria:'DNA'         },
-  { id:'dna_ciclope',        nome:'DNA de Ciclope',             raridade:'Incomum',   categoria:'DNA'         },
-  { id:'dna_gorgona',        nome:'DNA de Górgona',             raridade:'Incomum',   categoria:'DNA'         },
-  { id:'dna_centauro',       nome:'DNA de Centauro',            raridade:'Incomum',   categoria:'DNA'         },
-  { id:'dna_quimera',        nome:'DNA de Quimera',             raridade:'Incomum',   categoria:'DNA'         },
-  { id:'dna_grifo',          nome:'DNA de Grifo',               raridade:'Incomum',   categoria:'DNA'         },
-  { id:'dna_medusa',         nome:'DNA de Medusa',              raridade:'Raro',      categoria:'DNA'         },
-  { id:'dna_hidra',          nome:'DNA de Hidra',               raridade:'Raro',      categoria:'DNA'         },
-  { id:'dna_basilisco',      nome:'DNA de Basilisco',           raridade:'Raro',      categoria:'DNA'         },
-  { id:'dna_escila',         nome:'DNA de Escila',              raridade:'Raro',      categoria:'DNA'         },
-  { id:'dna_esfinge',        nome:'DNA de Esfinge',             raridade:'Raro',      categoria:'DNA'         },
-  { id:'dna_cerbero',        nome:'DNA de Cerbero',             raridade:'Raro',      categoria:'DNA'         },
-  { id:'dna_fenrir',         nome:'DNA de Fenrir',              raridade:'Lendario',  categoria:'DNA Boss'    },
-  { id:'dna_tifao',          nome:'DNA de Tifão',               raridade:'Lendario',  categoria:'DNA Boss'    },
-  { id:'dna_cronos_corrompido',nome:'DNA de Cronos Corrompido', raridade:'Lendario',  categoria:'DNA Boss'    },
-  { id:'dna_leviata',        nome:'DNA de Leviatã',             raridade:'Lendario',  categoria:'DNA Boss'    },
-  { id:'dna_caos_encarnado', nome:'DNA de Caos Encarnado',      raridade:'Primordial',categoria:'DNA Final'   },
-  { id:'dna_nyx_sombria',    nome:'DNA de Nyx Sombria',         raridade:'Primordial',categoria:'DNA Final'   },
-  // ── CRISTAIS DE ALMA (SemideusItemConfig) ──
-  { id:'cristal_guerreiro',  nome:'Cristal Guerreiro',          raridade:'Comum',     categoria:'Cristal Alma'},
-  { id:'cristal_protetor',   nome:'Cristal Protetor',           raridade:'Comum',     categoria:'Cristal Alma'},
-  { id:'cristal_cacador',    nome:'Cristal Caçador',            raridade:'Incomum',   categoria:'Cristal Alma'},
-  { id:'cristal_altruista',  nome:'Cristal Altruísta',          raridade:'Incomum',   categoria:'Cristal Alma'},
-  { id:'cristal_estrategista',nome:'Cristal Estrategista',      raridade:'Raro',      categoria:'Cristal Alma'},
-  { id:'cristal_vingativo',  nome:'Cristal Vingativo',          raridade:'Raro',      categoria:'Cristal Alma'},
-  { id:'cristal_caotico',    nome:'Cristal Caótico',            raridade:'Raro',      categoria:'Cristal Alma'},
-  { id:'cristal_predador',   nome:'Cristal Predador',           raridade:'Epico',     categoria:'Cristal Alma'},
-  { id:'cristal_fantasma',   nome:'Cristal Fantasma',           raridade:'Epico',     categoria:'Cristal Alma'},
-  { id:'cristal_berserker',  nome:'Cristal Berserker',          raridade:'Epico',     categoria:'Cristal Alma'},
-  { id:'cristal_divino',     nome:'Cristal Divino',             raridade:'Lendario',  categoria:'Cristal Alma'},
-  { id:'cristal_vazio',      nome:'Cristal do Vazio',           raridade:'Primordial',categoria:'Cristal Alma'},
-  // ── CATALISADORES (SemideusItemConfig) ──
-  { id:'cat_chama_primordial',nome:'Chama Primordial',          raridade:'Incomum',   categoria:'Catalisador' },
-  { id:'cat_gelo_eterno',    nome:'Gelo Eterno',                raridade:'Incomum',   categoria:'Catalisador' },
-  { id:'cat_raio_puro',      nome:'Raio Puro',                  raridade:'Raro',      categoria:'Catalisador' },
-  { id:'cat_veneno_equidna', nome:'Veneno de Equidna',          raridade:'Raro',      categoria:'Catalisador' },
-  { id:'cat_vento_ciclonico',nome:'Vento Ciclônico',            raridade:'Incomum',   categoria:'Catalisador' },
-  { id:'cat_trevas_erebo',   nome:'Trevas do Érebo',            raridade:'Epico',     categoria:'Catalisador' },
-  { id:'cat_lagrima_tetis',  nome:'Lágrima de Tétis',           raridade:'Raro',      categoria:'Catalisador' },
-  { id:'cat_mel_ambrosia',   nome:'Mel de Ambrosia',            raridade:'Raro',      categoria:'Catalisador' },
-  { id:'cat_agua_estige',    nome:'Água do Estige',             raridade:'Epico',     categoria:'Catalisador' },
-  { id:'cat_areia_cronos',   nome:'Areia de Cronos',            raridade:'Epico',     categoria:'Catalisador' },
-  { id:'cat_sangue_tita',    nome:'Sangue de Titã',             raridade:'Lendario',  categoria:'Catalisador' },
-  { id:'cat_fragmento_caos', nome:'Fragmento do Caos',          raridade:'Lendario',  categoria:'Catalisador' },
-  { id:'cat_ovo_legado',     nome:'Ovo de Legado',              raridade:'Variavel',  categoria:'Catalisador' },
-  { id:'cat_runa_yggdrasil', nome:'Runa de Yggdrasil',          raridade:'Epico',     categoria:'Catalisador' },
-  { id:'cat_olho_horus',     nome:'Olho de Hórus',              raridade:'Lendario',  categoria:'Catalisador' },
-  { id:'cat_chave_tartaro',  nome:'Chave do Tártaro',           raridade:'Primordial',categoria:'Catalisador' },
-  // ── ITENS AUXILIARES (SemideusItemConfig) ──
-  { id:'aux_purificador_divino',nome:'Purificador Divino',      raridade:'Raro',      categoria:'Auxiliar'    },
-  { id:'aux_amplificador_dna',  nome:'Amplificador de DNA',     raridade:'Raro',      categoria:'Auxiliar'    },
-  { id:'aux_estabilizador_alma',nome:'Estabilizador de Alma',   raridade:'Raro',      categoria:'Auxiliar'    },
-  { id:'aux_catalisador_duplo', nome:'Catalisador Duplo',       raridade:'Epico',     categoria:'Auxiliar'    },
-  { id:'aux_extrator_dna',      nome:'Extrator de DNA',         raridade:'Raro',      categoria:'Auxiliar'    },
-  { id:'aux_copiador_essencia', nome:'Copiador de Essência',    raridade:'Epico',     categoria:'Auxiliar'    },
-  { id:'aux_preservador_legado',nome:'Preservador de Legado',   raridade:'Raro',      categoria:'Auxiliar'    },
-  { id:'aux_tomo_combinacoes',  nome:'Tomo de Combinações',     raridade:'Lendario',  categoria:'Auxiliar'    },
-];
+const CATALOGO_GAME_PATHS = {
+  itemConfig: path.resolve(__dirname, '../ReplicatedStorage/Modules/Config/ItemConfig.lua'),
+  semideusConfig: path.resolve(__dirname, '../ReplicatedStorage/Modules/Config/SemideusItemConfig.lua'),
+};
+
+const SEMIDEUS_SECTION_CATEGORY = {
+  EssenciasDivinas: 'Semideus > Essencias Divinas',
+  DNACriaturas: 'Semideus > DNA de Criaturas',
+  CristaisAlma: 'Semideus > Cristais de Alma',
+  Catalisadores: 'Semideus > Catalisadores',
+  ItensAuxiliares: 'Semideus > Itens Auxiliares',
+};
+
+function safeReadFileText(filePath) {
+  try {
+    return fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+function parseItemConfigLua(filePath) {
+  const raw = safeReadFileText(filePath);
+  if (!raw) return [];
+
+  const out = [];
+  let current = null;
+
+  const flush = () => {
+    if (!current || !current.id) return;
+    out.push({
+      id: current.id,
+      nome: current.nome || current.id,
+      raridade: current.raridade || 'Common',
+      categoria: `Base > ${current.categoria || 'Geral'}`,
+    });
+    current = null;
+  };
+
+  for (const lineRaw of raw.split(/\r?\n/)) {
+    const line = lineRaw.trim();
+    const id = line.match(/\bId\s*=\s*"([^"]+)"/);
+    if (id) {
+      flush();
+      current = { id: id[1] };
+    }
+    if (!current) continue;
+
+    const nome = line.match(/\bName\s*=\s*"([^"]+)"/);
+    if (nome) current.nome = nome[1];
+    const raridade = line.match(/\bRarity\s*=\s*"([^"]+)"/);
+    if (raridade) current.raridade = raridade[1];
+    const categoria = line.match(/\bCategory\s*=\s*"([^"]+)"/);
+    if (categoria) current.categoria = categoria[1];
+  }
+  flush();
+  return out;
+}
+
+function parseSemideusConfigLua(filePath) {
+  const raw = safeReadFileText(filePath);
+  if (!raw) return [];
+
+  const out = [];
+  let currentSection = null;
+  let current = null;
+
+  const flush = () => {
+    if (!current || !current.id) return;
+    out.push({
+      id: current.id,
+      nome: current.nome || current.id,
+      raridade: current.raridade || 'Comum',
+      categoria: SEMIDEUS_SECTION_CATEGORY[currentSection] || 'Semideus > Geral',
+    });
+    current = null;
+  };
+
+  for (const lineRaw of raw.split(/\r?\n/)) {
+    const line = lineRaw.trim();
+
+    const section = line.match(/^SemideusItemConfig\.(\w+)\s*=\s*{/);
+    if (section) {
+      flush();
+      currentSection = section[1];
+      continue;
+    }
+
+    if (!currentSection || !SEMIDEUS_SECTION_CATEGORY[currentSection]) continue;
+
+    const id = line.match(/\bId\s*=\s*"([^"]+)"/);
+    if (id) {
+      flush();
+      current = { id: id[1] };
+    }
+    if (!current) continue;
+
+    const nome = line.match(/\bNome\s*=\s*"([^"]+)"/);
+    if (nome) current.nome = nome[1];
+    const raridade = line.match(/\bRaridade\s*=\s*"([^"]+)"/);
+    if (raridade) current.raridade = raridade[1];
+  }
+  flush();
+  return out;
+}
+
+function loadGameCatalog() {
+  const baseItems = parseItemConfigLua(CATALOGO_GAME_PATHS.itemConfig);
+  const semideusItems = parseSemideusConfigLua(CATALOGO_GAME_PATHS.semideusConfig);
+  const merged = [...baseItems, ...semideusItems];
+  const dedup = new Map();
+  for (const item of merged) {
+    if (!item?.id) continue;
+    dedup.set(item.id, item);
+  }
+  return [...dedup.values()].sort((a, b) => {
+    const ca = String(a.categoria || '');
+    const cb = String(b.categoria || '');
+    if (ca !== cb) return ca.localeCompare(cb, 'pt-BR');
+    return String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR');
+  });
+}
+
+const CATALOGO_FIXO = loadGameCatalog();
 
 const RARIDADE_EMOJI = {
   Common:'⚪', Uncommon:'🟢', Rare:'🔵', Epic:'🟣', Legendary:'🟡', Mythic:'🔴',
@@ -461,7 +472,13 @@ const RARIDADE_EMOJI = {
 async function getCatalogoCompleto() {
   const db = await lerCodigos();
   const extras = db.itensExtras || [];
-  return [...CATALOGO_FIXO, ...extras];
+  const merged = [...CATALOGO_FIXO, ...extras];
+  const dedup = new Map();
+  for (const it of merged) {
+    if (!it?.id) continue;
+    dedup.set(it.id, it);
+  }
+  return [...dedup.values()];
 }
 
 // Helper — formata item para exibição no Discord
@@ -1525,6 +1542,12 @@ async function avancarRecompensa(interaction, sessao, adminId) {
       // Mostrar seletor de categoria
       const catalogo   = await getCatalogoCompleto();
       const categorias = [...new Set(catalogo.map(i => i.categoria))].sort();
+      if (!categorias.length) {
+        return interaction.editReply({
+          content: '⚠️ Catálogo de itens vazio. Verifique os arquivos de configuração do jogo.',
+          components: [],
+        });
+      }
       const opsCat = categorias.slice(0, 25).map(c => ({
         label: c, value: `cat:${c}`,
         description: `${catalogo.filter(i => i.categoria === c).length} itens`,
@@ -2019,12 +2042,16 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
         new StringSelectMenuBuilder()
           .setCustomId(`gc_tipo_${interaction.user.id}`)
           .setPlaceholder('🎁 Que tipos de recompensa este código vai dar?')
-          .setMinValues(1).setMaxValues(3)
+          .setMinValues(1).setMaxValues(6)
           .addOptions([
-            { label: 'Moedas',       value: 'moedas', emoji: '🪙', description: 'Moedas do jogo' },
-            { label: 'Gemas',        value: 'gemas',  emoji: '💎', description: 'Gemas premium' },
-            { label: 'XP Bônus',     value: 'xp',     emoji: '⚡', description: 'Experiência extra' },
-            { label: 'Item do Jogo', value: 'item',   emoji: '🎁', description: 'Item real do catálogo (104 itens disponíveis)' },
+            { label: 'GodCoins',      value: 'moedas',         emoji: '🪙', description: 'Moeda principal do jogo' },
+            { label: 'Gems',          value: 'gemas',          emoji: '💎', description: 'Moeda premium' },
+            { label: 'Presents',      value: 'presents',       emoji: '🎁', description: 'Moeda de eventos e recompensas' },
+            { label: 'Favor Grego',   value: 'favor_greek',    emoji: '🏛️', description: 'Atributo de progresso por panteão' },
+            { label: 'Favor Nórdico', value: 'favor_norse',    emoji: '🛡️', description: 'Atributo de progresso por panteão' },
+            { label: 'Favor Egípcio', value: 'favor_egyptian', emoji: '𓂀', description: 'Atributo de progresso por panteão' },
+            { label: 'XP Bônus',      value: 'xp',             emoji: '⚡', description: 'Experiência extra' },
+            { label: 'Item do Jogo',  value: 'item',           emoji: '🎁', description: 'Itens reais do inventário (base + semideus)' },
           ])
       );
       const embed = new EmbedBuilder()
@@ -2056,6 +2083,9 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
       const categoria = interaction.values[0].replace('cat:', '');
       const catalogo  = await getCatalogoCompleto();
       const itensCat  = catalogo.filter(i => i.categoria === categoria).slice(0, 25);
+      if (!itensCat.length) {
+        return interaction.reply({ content: '⚠️ Nenhum item encontrado nesta categoria.', ephemeral: true });
+      }
       const opsItens  = itensCat.map(i => ({
         label: i.nome.slice(0, 100), value: i.id,
         description: `${i.raridade} · ${i.id}`,
@@ -2106,7 +2136,8 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
       await interaction.deferUpdate();
-      const qtd  = parseInt(interaction.fields.getTextInputValue('valor')) || 1;
+      const qtdInput = parseInt(interaction.fields.getTextInputValue('valor'), 10);
+      const qtd = Number.isFinite(qtdInput) && qtdInput > 0 ? qtdInput : 1;
       const item = sessao.itemAtual;
       const emoji = RARIDADE_EMOJI[item.raridade] || '🎁';
       sessao.recompensas.push({ tipo: 'item', valor: item.id, quantidade: qtd, label: `${emoji} ${item.nome}${qtd > 1 ? ` x${qtd}` : ''} *(${item.raridade})*` });
@@ -2124,7 +2155,8 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
       await interaction.deferUpdate();
       const tipo  = sessao.tiposSelecionados[sessao.tiposIdx];
       const info  = TIPOS_RECOMPENSA[tipo];
-      const valor = parseInt(interaction.fields.getTextInputValue('valor')) || 0;
+      const valorInput = parseInt(interaction.fields.getTextInputValue('valor'), 10);
+      const valor = Number.isFinite(valorInput) && valorInput > 0 ? valorInput : 1;
       sessao.recompensas.push({ tipo, valor, quantidade: valor, label: `${info.emoji} ${info.label}: ${valor} ${info.unidade}` });
       sessao.tiposIdx++;
       return await avancarRecompensa(interaction, sessao, adminId);
@@ -2138,6 +2170,12 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
       const catalogo   = await getCatalogoCompleto();
       const categorias = [...new Set(catalogo.map(i => i.categoria))].sort();
+      if (!categorias.length) {
+        return interaction.update({
+          embeds: [new EmbedBuilder().setColor(CONFIG.CORES.ERRO).setTitle('⚠️ Catálogo vazio').setDescription('Nenhuma categoria disponível no momento.')],
+          components: [],
+        });
+      }
       const opsCat = categorias.slice(0, 25).map(c => ({
         label: c, value: `cat:${c}`, description: `${catalogo.filter(i => i.categoria === c).length} itens`,
       }));
