@@ -263,8 +263,22 @@ async function lerRoadmap()          { return lerArquivoJsonDoGist('roadmap.json
 async function salvarRoadmap(v)      { return salvarArquivoJsonNoGist('roadmap.json', v); }
 
 // ─────────────────────────────────────────────────────────────
-// HELPERS GERAIS
+// HELPERS DE PERMISSÃO POR CARGO
 // ─────────────────────────────────────────────────────────────
+function temCargo(member, ...cargos) {
+  return cargos.some(id => id && member?.roles?.cache?.has(id));
+}
+function ehDono(member)   { return temCargo(member, CONFIG.CARGO_DONO); }
+function ehAdmin(member)  { return temCargo(member, CONFIG.CARGO_DONO, CONFIG.CARGO_ADMIN); }
+function ehMod(member)    { return temCargo(member, CONFIG.CARGO_DONO, CONFIG.CARGO_ADMIN, CONFIG.CARGO_MOD); }
+function ehEquipe(member) { return temCargo(member, CONFIG.CARGO_DONO, CONFIG.CARGO_ADMIN, CONFIG.CARGO_MOD, CONFIG.CARGO_EQUIPE); }
+
+async function getMember(message) {
+  if (!message.guild) return null;
+  return message.guild.members.fetch(message.author.id).catch(() => null);
+}
+
+
 function temPermissaoModeracao(interaction) {
   return interaction.member?.permissions?.has(PermissionFlagsBits.ManageMessages);
 }
@@ -1348,8 +1362,7 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.isChatInputCommand() && interaction.commandName === 'changelog') {
       // Apenas Dono e Admin (verifica cargos)
       const member = interaction.member;
-      const temAcesso = (CONFIG.CARGO_DONO && member.roles.cache.has(CONFIG.CARGO_DONO)) ||
-                        (CONFIG.CARGO_ADMIN && member.roles.cache.has(CONFIG.CARGO_ADMIN));
+      const temAcesso = ehAdmin(member);
       if (!temAcesso) return interaction.reply({ content: '⚠️ *Apenas o Dono ou Admin do Olimpo pode editar os anais eternos.*', ephemeral: true });
 
       const sub = interaction.options.getSubcommand();
@@ -1685,24 +1698,26 @@ client.on('messageCreate', async (message) => {
   // !revogar — Dono/Admin
   if (texto.startsWith('!revogar')) return handleRevogar(message, texto.split(' ').slice(1));
 
-  // Canal de updates
+  // Canal de updates — comandos restritos por cargo
   if (message.channelId === CONFIG.CANAL_UPDATE_ID) {
-    if (texto === '!update') return iniciarFormulario(message);
+    const member = await getMember(message);
+
+    if (texto === '!update') {
+      if (!ehMod(member)) return message.reply('🚫 *Apenas Moderadores, Admins ou Dono podem proclamar decretos.*');
+      return iniciarFormulario(message);
+    }
+
     if (texto === '!listar') {
+      if (!ehEquipe(member)) return message.reply('🚫 *Apenas membros da Equipe ou superior podem consultar os anais.*');
       try {
         const dados = await lerGist();
         if (!dados.updates?.length) return message.reply('📜 *Os pergaminhos estão em branco, mortal. Nenhum decreto foi proclamado ainda.*');
         return responderTextoLongo(message, '📜 **ANAIS DO OLIMPO — Decretos Proclamados**\n━━━━━━━━━━━━━━━━━━━━━━━━━\n' + dados.updates.map((u, i) => `**#${i+1}** ⚔️ \`${u.versao}\` — ${u.titulo} *(${u.data})* ${u.imagem ? '🖼️' : ''}`).join('\n'), true);
       } catch { return message.reply('⚠️ *As brumas do Érebo ocultam os pergaminhos... Tente novamente.*'); }
     }
-    // !apagar N — apaga o changelog de número N
+
     if (texto.startsWith('!apagar')) {
-      const member = await message.guild.members.fetch(message.author.id).catch(() => null);
-      const temAcesso = member && (
-        (CONFIG.CARGO_DONO  && member.roles.cache.has(CONFIG.CARGO_DONO)) ||
-        (CONFIG.CARGO_ADMIN && member.roles.cache.has(CONFIG.CARGO_ADMIN))
-      );
-      if (!temAcesso) return message.reply('🚫 *Apenas o Dono ou Admin pode apagar decretos.*');
+      if (!ehAdmin(member)) return message.reply('🚫 *Apenas Admin ou Dono pode apagar decretos.*');
       const num = parseInt(texto.split(' ')[1]);
       if (isNaN(num)) return message.reply('⚠️ *Uso: `!apagar 2` — informe o número do decreto (veja com `!listar`).*');
       try {
@@ -1715,57 +1730,103 @@ client.on('messageCreate', async (message) => {
         return message.reply(`🗑️ **Decreto apagado:** \`${removido.versao}\` — ${removido.titulo}\n*O site foi atualizado.*`);
       } catch { return message.reply('⚠️ *Erro ao apagar. Tente novamente.*'); }
     }
-    // !editar N campo valor — edita um campo de changelog
+
     if (texto.startsWith('!editar')) {
-      const member = await message.guild.members.fetch(message.author.id).catch(() => null);
-      const temAcesso = member && (
-        (CONFIG.CARGO_DONO  && member.roles.cache.has(CONFIG.CARGO_DONO)) ||
-        (CONFIG.CARGO_ADMIN && member.roles.cache.has(CONFIG.CARGO_ADMIN))
-      );
-      if (!temAcesso) return message.reply('🚫 *Apenas o Dono ou Admin pode editar decretos.*');
+      if (!ehAdmin(member)) return message.reply('🚫 *Apenas Admin ou Dono pode editar decretos.*');
       const partes = texto.split(' ');
-      // !editar [num] [campo] [valor...]
-      const num   = parseInt(partes[1]);
-      const campo = partes[2]?.toLowerCase();
-      const valor = partes.slice(3).join(' ');
+      const num    = parseInt(partes[1]);
+      const campo  = partes[2]?.toLowerCase();
+      const valor  = partes.slice(3).join(' ');
       const camposValidos = ['titulo', 'subtitulo', 'imagem', 'proximo'];
-      if (isNaN(num) || !campo || !valor) {
-        return message.reply('⚠️ *Uso: `!editar 1 titulo Novo Título Aqui`*\n*Campos: `titulo`, `subtitulo`, `imagem` (URL), `proximo`*');
-      }
+      if (isNaN(num) || !campo || !valor)
+        return message.reply('⚠️ *Uso: `!editar 1 titulo Novo Título`*\n*Campos: `titulo`, `subtitulo`, `imagem` (URL), `proximo`*');
       if (!camposValidos.includes(campo)) return message.reply(`⚠️ *Campo inválido. Use: ${camposValidos.join(', ')}*`);
       try {
         const dados = await lerGist();
         const updates = dados.updates || [];
         if (num < 1 || num > updates.length) return message.reply(`⚠️ *Número inválido. Há ${updates.length} decreto(s).*`);
-        if (campo === 'proximo') { dados.proximaUpdate = valor; }
-        else { updates[num - 1][campo] = valor; }
+        if (campo === 'proximo') dados.proximaUpdate = valor;
+        else updates[num - 1][campo] = valor;
         dados.updates = updates;
         await salvarGist(dados);
         return message.reply(`✏️ **Decreto #${num} atualizado!**\nCampo \`${campo}\` → ${valor}\n*O site foi atualizado.*`);
       } catch { return message.reply('⚠️ *Erro ao editar. Tente novamente.*'); }
     }
+
     if (texto === '!ajuda') {
-      return message.reply(
-        '🔱 **GRIMÓRIO DO OLIMPO — Poderes Disponíveis**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
-        '📣 **Comandos Globais** *(qualquer canal)*\n' +
-        '🐛 `/bug`              — Relatar uma anomalia\n' +
-        '💡 `/sugestao`         — Enviar uma visão ao Olimpo\n' +
-        '🏆 `/rank`             — Ver teu título divino\n' +
-        '🗳️ `/enquete`          — Criar enquete *(mod)*\n' +
-        '🔑 `!token`            — Gerar token de acesso ao site\n' +
-        '🚫 `!revogar`          — Listar tokens ativos *(Dono/Admin)*\n' +
-        '🚫 `!revogar @usuário` — Revogar token de alguém *(Dono/Admin)*\n\n' +
-        '⚔️ **Canal de Decretos**\n' +
-        '📜 `!update`           — Ritual de novo decreto\n' +
-        '📋 `!listar`           — Consultar os anais\n' +
-        '📖 `!ajuda`            — Invocar este grimório\n\n' +
-        '🎖️ **Níveis de acesso ao site:**\n' +
-        '👑 Dono · 🔱 Admin · ⚔️ Moderador · 🛡️ Equipe\n\n' +
-        '✨ **O Oráculo** *(mencione em qualquer canal)*\n' +
-        '`@Bot qual torre é melhor?`        — Consulta geral\n' +
-        '`@Bot tenho um bug`                — Auxílio técnico\n' +
-        '`@Bot sugestão: torre de Apolo`    — Análise de visão'
-      );
+      // Monta ajuda dinâmica de acordo com o cargo do usuário
+      const member = await getMember(message);
+      const isDono   = ehDono(member);
+      const isAdmin  = ehAdmin(member);
+      const isMod    = ehMod(member);
+      const isEquipe = ehEquipe(member);
+      const isTodos  = true;
+
+      let msg = '🔱 **GRIMÓRIO DO OLIMPO — Poderes Disponíveis**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+
+      // Todos os mortais
+      msg += '👥 **Para todos os mortais**\n';
+      msg += '🐛 `/bug`                  — Relatar uma anomalia\n';
+      msg += '💡 `/sugestao`             — Enviar uma visão ao Olimpo\n';
+      msg += '🏆 `/rank`                 — Ver teu título divino\n';
+      msg += '🎫 Menu de tickets         — Abrir chamado de suporte\n';
+      msg += '\n';
+
+      // Equipe+
+      if (isEquipe) {
+        msg += '🛡️ **Equipe** *(e superiores)*\n';
+        msg += '🔑 `!token`               — Gerar token de acesso ao site\n';
+        msg += '📋 `!listar`              — Consultar os anais do changelog\n';
+        msg += '🎫 `/ticket listar`       — Ver tickets abertos\n';
+        msg += '🎫 `/ticket assumir`      — Assumir atendimento de ticket\n';
+        msg += '\n';
+      }
+
+      // Mod+
+      if (isMod) {
+        msg += '⚔️ **Moderadores** *(e superiores)*\n';
+        msg += '📜 `!update`              — Ritual de novo decreto\n';
+        msg += '🗳️ `/enquete`             — Criar enquete no site\n';
+        msg += '🧹 `/limpar`              — Apagar mensagens do canal\n';
+        msg += '📢 `/anunciar`            — Fazer anúncio no canal\n';
+        msg += '🎫 `/ticket painel`       — Enviar painel de tickets\n';
+        msg += '🎫 `/ticket fechar`       — Fechar ticket\n';
+        msg += '🎫 `/ticket resolver`     — Marcar ticket como resolvido\n';
+        msg += '🎫 `/ticket add/remove`   — Gerenciar acesso ao ticket\n';
+        msg += '\n';
+      }
+
+      // Admin+
+      if (isAdmin) {
+        msg += '🔱 **Admins** *(e Dono)*\n';
+        msg += '✏️ `!editar N campo val`  — Editar campo de um decreto\n';
+        msg += '🗑️ `!apagar N`            — Apagar um decreto\n';
+        msg += '📜 `/changelog listar`    — Listar todos os decretos\n';
+        msg += '📜 `/changelog editar`    — Editar decreto pelo slash\n';
+        msg += '📜 `/changelog apagar`    — Apagar decreto pelo slash\n';
+        msg += '📜 `/changelog imagem`    — Trocar imagem de decreto\n';
+        msg += '🗺️ `/roadmap` (todos subs) — Gerenciar roadmap do site\n';
+        msg += '🚫 `!revogar`             — Listar tokens ativos\n';
+        msg += '🚫 `!revogar @usuário`    — Revogar token de alguém\n';
+        msg += '\n';
+      }
+
+      // Dono
+      if (isDono) {
+        msg += '👑 **Dono** *(exclusivo)*\n';
+        msg += '🔑 Acesso total ao painel do site\n';
+        msg += '🗑️ `token.revogar` — permissão de revogar tokens via site\n';
+        msg += '\n';
+      }
+
+      msg += '✨ **O Oráculo** *(mencione em qualquer canal)*\n';
+      msg += '`@Bot qual torre é melhor?`  — Consulta geral\n';
+      msg += '`@Bot tenho um bug`          — Auxílio técnico\n';
+      msg += '`@Bot sugestão: torre X`     — Análise de ideia\n';
+      msg += '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+      msg += `*Logado como: ${isDono ? '👑 Dono' : isAdmin ? '🔱 Admin' : isMod ? '⚔️ Moderador' : isEquipe ? '🛡️ Equipe' : '👥 Mortal'}*`;
+
+      return message.reply(msg);
     }
   }
 
