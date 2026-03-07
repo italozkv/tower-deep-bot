@@ -691,15 +691,37 @@ async function processarEtapa(message) {
         try {
           const canalAnuncio = await client.channels.fetch(CONFIG.CANAL_ANUNCIO_ID);
           if (canalAnuncio?.isTextBased()) {
-            const tagLabels     = dados.tags.map(t => Object.values(TAGS).find(x => x.key === t)?.label || t).join(' ');
-            const mudancasTexto = dados.mudancas.map(m => `> ${m}`).join('\n');
-            await canalAnuncio.send([
-              '@everyone','','━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━','⚡ **DECRETO DIVINO PROCLAMADO** ⚡',
-              `**${dados.versao} — ${dados.titulo}**`,'━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-              dados.subtitulo ? `*"${dados.subtitulo}"*` : '','',tagLabels,'','📜 **Obras dos Deuses:**',
-              mudancasTexto, dados.proximo ? `🔮 **Próxima update:** ${dados.proximo}` : '',
-              '','🌐 **Site:** https://italozkv.github.io/tower-deep/changelog.html','━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-            ].filter(l => l !== undefined).join('\n'));
+            const tagLabels     = dados.tags.map(t => Object.values(TAGS).find(x => x.key === t)?.label || t).join('  ');
+            const mudancasTexto = dados.mudancas.map(m => `> ⚡ ${m}`).join('\n');
+
+            const embedUpdate = new EmbedBuilder()
+              .setColor(0xc9a84c)
+              .setTitle(`⚡ ${dados.versao} — ${dados.titulo}`)
+              .setDescription(
+                (dados.subtitulo ? `*"${dados.subtitulo}"*\n\n` : '') +
+                `${tagLabels}\n\n` +
+                `**📜 Obras dos Deuses**\n${mudancasTexto}` +
+                (dados.proximo ? `\n\n**🔮 Próxima Atualização**\n> ${dados.proximo}` : '')
+              )
+              .setFooter({ text: 'Tower Deep · Alpha' })
+              .setTimestamp();
+
+            const botoesUpdate = new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setLabel('🌐 Site Oficial')
+                .setURL('https://italozkv.github.io/tower-deep/')
+                .setStyle(ButtonStyle.Link),
+              new ButtonBuilder()
+                .setLabel('📜 Changelog Completo')
+                .setURL('https://italozkv.github.io/tower-deep/changelog.html')
+                .setStyle(ButtonStyle.Link),
+              new ButtonBuilder()
+                .setLabel('🗳️ Votar em Features')
+                .setURL('https://italozkv.github.io/tower-deep/votos.html')
+                .setStyle(ButtonStyle.Link),
+            );
+
+            await canalAnuncio.send({ content: '@everyone', embeds: [embedUpdate], components: [botoesUpdate] });
           }
         } catch (err) { console.error('Erro ao anunciar update:', err.message); }
       }
@@ -857,16 +879,29 @@ async function abrirTicket(interaction, categoria) {
     .setColor(catInfo.cor)
     .setTitle(`${catInfo.emoji} Ticket #${numero} — ${catInfo.label}`)
     .setDescription(
-      `Bem-vindo, ${user}!\n\n*Os deuses do Olimpo te ouvem, mortal.*\n\n` +
+      `Bem-vindo, ${user}!\n\n` +
+      `*Os deuses do Olimpo te ouvem, mortal.*\n\n` +
       `**Descreve teu problema com o máximo de detalhes possível.**\n` +
-      `Nossa equipe responderá o mais breve possível.\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `📋 **Categoria:** ${catInfo.label}\n` +
-      `👤 **Aberto por:** ${user.tag}\n` +
-      `🕐 **Aberto em:** <t:${Math.floor(Date.now() / 1000)}:F>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+      `Nossa equipe responderá o mais breve possível.`
     )
-    .setFooter({ text: 'Use os botões abaixo para gerenciar este ticket.' });
+    .addFields(
+      { name: '📋 Categoria',  value: catInfo.label,                                      inline: true },
+      { name: '👤 Aberto por', value: user.tag,                                           inline: true },
+      { name: '🕐 Aberto em',  value: `<t:${Math.floor(Date.now() / 1000)}:F>`,           inline: false },
+    )
+    .setFooter({ text: 'Tower Deep · Use os botões abaixo para gerenciar este ticket.' })
+    .setTimestamp();
+
+  const botoesLink = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setLabel('🌐 Site Oficial')
+      .setURL('https://italozkv.github.io/tower-deep/')
+      .setStyle(ButtonStyle.Link),
+    new ButtonBuilder()
+      .setLabel('📖 Wiki')
+      .setURL('https://italozkv.github.io/tower-deep/wiki.html')
+      .setStyle(ButtonStyle.Link),
+  );
 
   // Botões de controle
   const botoesControle = new ActionRowBuilder().addComponents(
@@ -875,7 +910,7 @@ async function abrirTicket(interaction, categoria) {
     new ButtonBuilder().setCustomId('ticket_assumir').setLabel('⚔️ Assumir').setStyle(ButtonStyle.Secondary),
   );
 
-  await canal.send({ content: `${user} | <@&${CONFIG.CARGO_SUPORTE || CONFIG.CARGO_MOD || ''}>`, embeds: [embedAbertura], components: [botoesControle] });
+  await canal.send({ content: `${user} | <@&${CONFIG.CARGO_SUPORTE || CONFIG.CARGO_MOD || ''}>`, embeds: [embedAbertura], components: [botoesControle, botoesLink] });
 
   await interaction.editReply({
     content: `${catInfo.emoji} *A câmara foi aberta, mortal!* → ${canal}\n*Dirija-se até lá para falar com nossa equipe.*`,
@@ -1169,12 +1204,28 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.isChatInputCommand() && interaction.commandName === 'anunciar') {
       if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Os deuses negam tua solicitação, mortal.*', ephemeral: true });
       const mensagem = interaction.options.getString('mensagem');
-      const titulo   = interaction.options.getString('titulo') || 'DECRETO DO OLIMPO';
+      const titulo   = interaction.options.getString('titulo') || 'Decreto do Olimpo';
       await interaction.reply({ content: '✅ *Teu anúncio foi proclamado no canal, guardião.*', ephemeral: true });
       try {
-        await interaction.channel.send(
-          `📢 **${titulo.toUpperCase()}**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n${mensagem}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*— Proclamado por ${interaction.user.username}*`
+        const embedAnuncio = new EmbedBuilder()
+          .setColor(0xc9a84c)
+          .setTitle(`📢 ${titulo}`)
+          .setDescription(mensagem)
+          .setFooter({ text: `Proclamado por ${interaction.user.username} · Tower Deep` })
+          .setTimestamp();
+
+        const botoesAnuncio = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setLabel('🌐 Site Oficial')
+            .setURL('https://italozkv.github.io/tower-deep/')
+            .setStyle(ButtonStyle.Link),
+          new ButtonBuilder()
+            .setLabel('📜 Changelog')
+            .setURL('https://italozkv.github.io/tower-deep/changelog.html')
+            .setStyle(ButtonStyle.Link),
         );
+
+        await interaction.channel.send({ embeds: [embedAnuncio], components: [botoesAnuncio] });
       } catch (err) { console.error('Erro ao anunciar:', err.message); }
       return;
     }
