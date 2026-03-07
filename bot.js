@@ -36,6 +36,86 @@ const slashCommands = [
     .setDescription('🗳️ Convocar um julgamento divino')
     .addStringOption(opt => opt.setName('pergunta').setDescription('A questão a ser julgada pelos mortais').setRequired(true)),
   new SlashCommandBuilder().setName('rank').setDescription('🏆 Consultar teu título divino no Olimpo'),
+  new SlashCommandBuilder()
+    .setName('limpar')
+    .setDescription('🧹 Apagar mensagens do canal (apenas moderadores)')
+    .addIntegerOption(opt => opt
+      .setName('quantidade')
+      .setDescription('Quantas mensagens apagar (10 ou 100)')
+      .setRequired(true)
+      .addChoices(
+        { name: 'Últimas 10 mensagens', value: 10 },
+        { name: 'Últimas 100 mensagens', value: 100 },
+      )),
+  new SlashCommandBuilder()
+    .setName('anunciar')
+    .setDescription('📢 Fazer um anúncio no canal atual')
+    .addStringOption(opt => opt
+      .setName('mensagem')
+      .setDescription('O conteúdo do anúncio')
+      .setRequired(true))
+    .addStringOption(opt => opt
+      .setName('titulo')
+      .setDescription('Título do anúncio (opcional)')
+      .setRequired(false)),
+  new SlashCommandBuilder()
+    .setName('enquete')
+    .setDescription('🗳️ Criar enquete vinculada ao site (votos.html)')
+    .addStringOption(opt => opt.setName('titulo').setDescription('Título da feature/enquete').setRequired(true))
+    .addStringOption(opt => opt.setName('descricao').setDescription('Descrição da feature').setRequired(true))
+    .addStringOption(opt => opt.setName('categoria').setDescription('Categoria').setRequired(true)
+      .addChoices(
+        {name:'⚔️ Torre', value:'torre'},
+        {name:'🗺️ Mapa', value:'mapa'},
+        {name:'⚙️ Mecânica', value:'mecanica'},
+        {name:'🎉 Evento', value:'evento'},
+        {name:'🔧 Outro', value:'outro'},
+      )),
+  new SlashCommandBuilder()
+    .setName('roadmap')
+    .setDescription('🗺️ Gerenciar o roadmap do jogo')
+    .addSubcommand(sub => sub
+      .setName('adicionar')
+      .setDescription('Adicionar nova versão ao roadmap')
+      .addStringOption(opt => opt.setName('versao').setDescription('Ex: v0.6').setRequired(true))
+      .addStringOption(opt => opt.setName('titulo').setDescription('Ex: A Chegada de Apolo').setRequired(true))
+      .addStringOption(opt => opt.setName('status').setDescription('Status da versão').setRequired(true)
+        .addChoices(
+          {name:'✓ Concluído', value:'done'},
+          {name:'⚡ Em Desenvolvimento', value:'active'},
+          {name:'◇ Planejado', value:'planned'},
+          {name:'◇ Futuro', value:'future'},
+        ))
+      .addStringOption(opt => opt.setName('data').setDescription('Ex: Abr 2026').setRequired(false))
+      .addStringOption(opt => opt.setName('lore').setDescription('Frase épica da versão').setRequired(false)))
+    .addSubcommand(sub => sub
+      .setName('item')
+      .setDescription('Adicionar item a uma versão do roadmap')
+      .addStringOption(opt => opt.setName('versao').setDescription('Versão alvo (ex: v0.6)').setRequired(true))
+      .addStringOption(opt => opt.setName('texto').setDescription('Descrição do item').setRequired(true))
+      .addStringOption(opt => opt.setName('badge').setDescription('Badge do item').setRequired(false)
+        .addChoices(
+          {name:'Novo', value:'Novo'},
+          {name:'Divino', value:'Divino'},
+          {name:'Fix', value:'Fix'},
+          {name:'Evento', value:'Evento'},
+        )))
+    .addSubcommand(sub => sub
+      .setName('concluir')
+      .setDescription('Marcar item como concluído')
+      .addStringOption(opt => opt.setName('versao').setDescription('Versão (ex: v0.4)').setRequired(true))
+      .addStringOption(opt => opt.setName('item').setDescription('Parte do texto do item a marcar').setRequired(true)))
+    .addSubcommand(sub => sub
+      .setName('status')
+      .setDescription('Mudar status de uma versão')
+      .addStringOption(opt => opt.setName('versao').setDescription('Versão (ex: v0.4)').setRequired(true))
+      .addStringOption(opt => opt.setName('status').setDescription('Novo status').setRequired(true)
+        .addChoices(
+          {name:'✓ Concluído', value:'done'},
+          {name:'⚡ Em Desenvolvimento', value:'active'},
+          {name:'◇ Planejado', value:'planned'},
+          {name:'◇ Futuro', value:'future'},
+        ))),
 ].map(cmd => cmd.toJSON());
 
 async function registrarSlashCommands(clientId) {
@@ -362,7 +442,7 @@ Se a resposta não estiver no seu conhecimento, diga honestamente que não sabe.
 }
 
 // ─────────────────────────────────────────────────────────────
-//  GIST (changelog)
+//  GIST (changelog, enquetes, roadmap)
 // ─────────────────────────────────────────────────────────────
 function lerGist() {
   return new Promise((resolve, reject) => {
@@ -389,6 +469,74 @@ function salvarGist(dados) {
       headers: { 'Authorization': `token ${CONFIG.GITHUB_TOKEN}`, 'User-Agent': 'TowerDeepBot', 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
     }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => resolve(JSON.parse(d))); });
     req.on('error', reject); req.write(body); req.end();
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+//  HELPERS GIST — ENQUETES
+// ─────────────────────────────────────────────────────────────
+async function lerEnquetes() {
+  return new Promise((resolve) => {
+    https.get({
+      hostname: 'api.github.com',
+      path: `/gists/${CONFIG.GIST_ID}`,
+      headers: { 'Authorization': `token ${CONFIG.GITHUB_TOKEN}`, 'User-Agent': 'TowerDeepBot', 'Accept': 'application/vnd.github.v3+json' }
+    }, res => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try {
+          const gist = JSON.parse(data);
+          const arquivo = gist.files?.['enquetes.json'];
+          resolve(arquivo ? JSON.parse(arquivo.content) : []);
+        } catch { resolve([]); }
+      });
+    }).on('error', () => resolve([]));
+  });
+}
+
+async function salvarEnquetes(lista) {
+  return new Promise((resolve) => {
+    const body = JSON.stringify({ files: { 'enquetes.json': { content: JSON.stringify(lista, null, 2) } } });
+    const req = https.request({
+      hostname: 'api.github.com', path: `/gists/${CONFIG.GIST_ID}`, method: 'PATCH',
+      headers: { 'Authorization': `token ${CONFIG.GITHUB_TOKEN}`, 'User-Agent': 'TowerDeepBot', 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => resolve()); });
+    req.on('error', () => resolve()); req.write(body); req.end();
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+//  HELPERS GIST — ROADMAP
+// ─────────────────────────────────────────────────────────────
+async function lerRoadmap() {
+  return new Promise((resolve) => {
+    https.get({
+      hostname: 'api.github.com',
+      path: `/gists/${CONFIG.GIST_ID}`,
+      headers: { 'Authorization': `token ${CONFIG.GITHUB_TOKEN}`, 'User-Agent': 'TowerDeepBot', 'Accept': 'application/vnd.github.v3+json' }
+    }, res => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try {
+          const gist = JSON.parse(data);
+          const arquivo = gist.files?.['roadmap.json'];
+          resolve(arquivo ? JSON.parse(arquivo.content) : []);
+        } catch { resolve([]); }
+      });
+    }).on('error', () => resolve([]));
+  });
+}
+
+async function salvarRoadmap(versoes) {
+  return new Promise((resolve) => {
+    const body = JSON.stringify({ files: { 'roadmap.json': { content: JSON.stringify(versoes, null, 2) } } });
+    const req = https.request({
+      hostname: 'api.github.com', path: `/gists/${CONFIG.GIST_ID}`, method: 'PATCH',
+      headers: { 'Authorization': `token ${CONFIG.GITHUB_TOKEN}`, 'User-Agent': 'TowerDeepBot', 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => resolve()); });
+    req.on('error', () => resolve()); req.write(body); req.end();
   });
 }
 
@@ -514,40 +662,21 @@ client.on('interactionCreate', async (interaction) => {
     return await interaction.showModal(modal);
   }
 
-  // ── /sugestao — abre modal ────────────────────────────────
+  // ── /sugestao — modal que salva no Gist como enquete ─────
   if (interaction.isChatInputCommand() && interaction.commandName === 'sugestao') {
     const modal = new ModalBuilder()
       .setCustomId('modal_sugestao')
       .setTitle('Visao para o Olimpo');
-
-    const titulo = new TextInputBuilder()
-      .setCustomId('sug_titulo')
-      .setLabel('O Titulo - Resuma sua sugestao')
-      .setStyle(TextInputStyle.Short)
-      .setPlaceholder('Ex: Torre de Artemis com flechas de gelo')
-      .setRequired(true)
-      .setMaxLength(100);
-
-    const descricao = new TextInputBuilder()
-      .setCustomId('sug_descricao')
-      .setLabel('Os Detalhes - Como funcionaria no jogo?')
-      .setStyle(TextInputStyle.Paragraph)
-      .setPlaceholder('Descreva a ideia com mais detalhes...')
-      .setRequired(true)
-      .setMaxLength(500);
-
-    const categoria = new TextInputBuilder()
-      .setCustomId('sug_categoria')
-      .setLabel('O Dominio - Categoria (torre/mapa/mecanica/evento)')
-      .setStyle(TextInputStyle.Short)
-      .setPlaceholder('torre, mapa, mecânica, evento ou outro')
-      .setRequired(false)
-      .setMaxLength(20);
-
     modal.addComponents(
-      new ActionRowBuilder().addComponents(titulo),
-      new ActionRowBuilder().addComponents(descricao),
-      new ActionRowBuilder().addComponents(categoria),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('sug_titulo').setLabel('O Titulo - Resuma sua sugestao').setStyle(TextInputStyle.Short).setPlaceholder('Ex: Torre de Artemis com flechas de gelo').setRequired(true).setMaxLength(100)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('sug_descricao').setLabel('Os Detalhes - Como funcionaria?').setStyle(TextInputStyle.Paragraph).setPlaceholder('Descreva a ideia com mais detalhes...').setRequired(true).setMaxLength(400)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('sug_categoria').setLabel('Categoria: torre, mapa, mecanica, evento, outro').setStyle(TextInputStyle.Short).setPlaceholder('torre').setRequired(false).setMaxLength(20)
+      ),
     );
     return await interaction.showModal(modal);
   }
@@ -582,52 +711,200 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
-  // ── Submit do modal de sugestão ───────────────────────────
+  // ── Submit do modal de sugestão — salva no Gist + site ───
   if (interaction.isModalSubmit() && interaction.customId === 'modal_sugestao') {
     const sugTitulo = interaction.fields.getTextInputValue('sug_titulo');
     const sugDesc   = interaction.fields.getTextInputValue('sug_descricao');
-    const sugCat    = interaction.fields.getTextInputValue('sug_categoria') || 'outro';
+    const rawCat    = interaction.fields.getTextInputValue('sug_categoria').toLowerCase().trim();
+    const cats = ['torre','mapa','mecanica','evento'];
+    const sugCat = cats.includes(rawCat) ? rawCat : 'outro';
 
-    // Responde de forma efêmera
-    await interaction.reply({
-      content: '🔱 *Tua visão foi proclamada no Olimpo! Os mortais irão julgá-la. Que os deuses decidam seu destino.*',
-      ephemeral: true,
-    });
-
-    // Posta sugestão com enquete no canal
+    await interaction.reply({ content: '⏳ *Os escribas registram tua visão nos pergaminhos...*', ephemeral: true });
     try {
+      const lista = await lerEnquetes();
+      const novaSugestao = {
+        id: `s${Date.now()}`,
+        titulo: sugTitulo, desc: sugDesc, cat: sugCat,
+        votos: 0, origem: 'sugestao', autor: interaction.user.tag,
+        criadoEm: new Date().toISOString()
+      };
+      lista.push(novaSugestao);
+      await salvarEnquetes(lista);
+      // Posta no canal com reação
       const msg = await interaction.channel.send(
-        '💡 **NOVA VISÃO DOS MORTAIS**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-        `👤 **Mortal:** ${interaction.user.tag}\n` +
+        `💡 **VISÃO DE ${interaction.user.username.toUpperCase()}**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
         `🏷️ **Categoria:** ${sugCat}\n` +
         `📋 **Ideia:** ${sugTitulo}\n` +
         `📝 **Detalhes:** ${sugDesc}\n` +
-        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-        '*Os deuses aguardam o veredito dos mortais...*\n\n' +
-        '👍 — Apoio esta visão!\n👎 — Os deuses rejeitam'
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `⬆️ — Apoio esta visão! *(vote também em https://italozkv.github.io/tower-deep/votos.html)*`
       );
-      await msg.react('👍');
-      await msg.react('👎');
-    } catch (err) { console.error('Erro ao postar sugestão:', err.message); }
+      await msg.react('⬆️');
+      await interaction.editReply({ content: '🔱 *Tua visão foi gravada nos pergaminhos e aparece no site! Que os deuses decidam seu destino.*' });
+    } catch (err) {
+      console.error('Erro ao salvar sugestão:', err.message);
+      await interaction.editReply({ content: '⚠️ *Os ventos do Caos interferiram. Tente novamente.*' });
+    }
     return;
   }
 
-  // ── /enquete ──────────────────────────────────────────────
+  // ── /enquete — cria enquete no Gist + Discord + site ─────
   if (interaction.isChatInputCommand() && interaction.commandName === 'enquete') {
-    const pergunta = interaction.options.getString('pergunta');
+    if (!interaction.member.permissions.has('ManageMessages')) {
+      return await interaction.reply({ content: '⚠️ *Apenas guardiões do Olimpo podem proclamar enquetes.*', ephemeral: true });
+    }
+    const titulo   = interaction.options.getString('titulo');
+    const descricao = interaction.options.getString('descricao');
+    const categoria = interaction.options.getString('categoria');
+    await interaction.reply({ content: '⏳ *Os escribas estão gravando nos pergaminhos...*', ephemeral: true });
     try {
+      const lista = await lerEnquetes();
+      const novaEnquete = {
+        id: `e${Date.now()}`,
+        titulo, desc: descricao, cat: categoria,
+        votos: 0, origem: 'discord',
+        criadoEm: new Date().toISOString()
+      };
+      lista.push(novaEnquete);
+      await salvarEnquetes(lista);
+      // Posta no Discord com reações de voto
       const msg = await interaction.channel.send(
-        '⚡ **JULGAMENTO DIVINO DO OLIMPO** ⚡\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
-        `🔮 ${pergunta}\n\n` +
-        '*Os deuses aguardam o veredicto dos mortais...*\n\n' +
-        '✅ — Aprovo / A favor\n❌ — Rejeito / Contra'
+        `🗳️ **NOVA ENQUETE — ${titulo.toUpperCase()}**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `🏷️ **Categoria:** ${categoria}\n` +
+        `📝 ${descricao}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `⬆️ — Quero esta feature!\n` +
+        `*Resultados visíveis em: https://italozkv.github.io/tower-deep/votos.html*`
       );
-      await msg.react('✅');
-      await msg.react('❌');
-      await interaction.reply({ content: '⚡ *O julgamento divino foi convocado, mortal!*', ephemeral: true });
+      await msg.react('⬆️');
+      await interaction.editReply({ content: `✅ *Enquete proclamada! Já aparece no site em https://italozkv.github.io/tower-deep/votos.html*` });
     } catch (err) {
       console.error('Erro ao criar enquete:', err.message);
-      await interaction.reply({ content: '⚠️ *As forças do Caos interferiram no julgamento.*', ephemeral: true });
+      await interaction.editReply({ content: '⚠️ *Os ventos do Caos interferiram. Tente novamente.*' });
+    }
+    return;
+  }
+
+  // ── /limpar ───────────────────────────────────────────────
+  if (interaction.isChatInputCommand() && interaction.commandName === 'limpar') {
+    // Verificar permissão de gerenciar mensagens
+    if (!interaction.member.permissions.has('ManageMessages')) {
+      return await interaction.reply({
+        content: '⚠️ *Os deuses negam tua solicitação, mortal. Apenas guardiões com permissão de moderar podem invocar este poder.*',
+        ephemeral: true,
+      });
+    }
+    const quantidade = interaction.options.getInteger('quantidade');
+    await interaction.reply({ content: `⏳ *Os deuses estão varrendo ${quantidade} mensagens do canal...*`, ephemeral: true });
+    try {
+      let apagadas = 0;
+      // Discord só permite deletar msgs em lotes de 100 e de até 14 dias
+      const msgs = await interaction.channel.messages.fetch({ limit: quantidade });
+      const recentes = msgs.filter(m => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000);
+      if (recentes.size === 0) {
+        return await interaction.editReply({ content: '⚠️ *Nenhuma mensagem recente encontrada para apagar (máx. 14 dias).*' });
+      }
+      await interaction.channel.bulkDelete(recentes, true);
+      apagadas = recentes.size;
+      await interaction.editReply({ content: `🧹 *${apagadas} mensagem(ns) foram varridas pelos ventos do Olimpo.*` });
+    } catch (err) {
+      console.error('Erro ao limpar:', err.message);
+      await interaction.editReply({ content: '⚠️ *Os deuses não conseguiram varrer o canal. Verifique as permissões do bot.*' });
+    }
+    return;
+  }
+
+  // ── /anunciar ─────────────────────────────────────────────
+  if (interaction.isChatInputCommand() && interaction.commandName === 'anunciar') {
+    if (!interaction.member.permissions.has('ManageMessages')) {
+      return await interaction.reply({
+        content: '⚠️ *Os deuses negam tua solicitação, mortal. Apenas guardiões podem proclamar decretos.*',
+        ephemeral: true,
+      });
+    }
+    const mensagem = interaction.options.getString('mensagem');
+    const titulo = interaction.options.getString('titulo') || 'DECRETO DO OLIMPO';
+
+    // Confirma só para quem usou (efêmero)
+    await interaction.reply({
+      content: `✅ *Teu anúncio foi proclamado no canal, guardião.*`,
+      ephemeral: true,
+    });
+
+    // Posta o anúncio publicamente
+    try {
+      await interaction.channel.send(
+        `📢 **${titulo.toUpperCase()}**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `${mensagem}\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `*— Proclamado por ${interaction.user.username}*`
+      );
+    } catch (err) {
+      console.error('Erro ao anunciar:', err.message);
+    }
+    return;
+  }
+
+  // ── /roadmap ──────────────────────────────────────────────
+  if (interaction.isChatInputCommand() && interaction.commandName === 'roadmap') {
+    if (!interaction.member.permissions.has('ManageMessages')) {
+      return await interaction.reply({ content: '⚠️ *Apenas guardiões do Olimpo podem editar os pergaminhos do roadmap.*', ephemeral: true });
+    }
+    const sub = interaction.options.getSubcommand();
+    await interaction.reply({ content: '⏳ *Consultando os pergaminhos divinos...*', ephemeral: true });
+    try {
+      const versoes = await lerRoadmap();
+
+      if (sub === 'adicionar') {
+        const versao = interaction.options.getString('versao');
+        const titulo = interaction.options.getString('titulo');
+        const status = interaction.options.getString('status');
+        const data   = interaction.options.getString('data') || '';
+        const lore   = interaction.options.getString('lore') || '';
+        if (versoes.find(v => v.versao === versao)) {
+          return await interaction.editReply({ content: `⚠️ *A versão ${versao} já existe nos pergaminhos.*` });
+        }
+        versoes.push({ versao, titulo, status, data, lore, itens: [] });
+        await salvarRoadmap(versoes);
+        await interaction.editReply({ content: `🗺️ **${versao} — ${titulo}** adicionada ao roadmap!\n*Visível em: https://italozkv.github.io/tower-deep/roadmap.html*` });
+      }
+
+      else if (sub === 'item') {
+        const versao = interaction.options.getString('versao');
+        const texto  = interaction.options.getString('texto');
+        const badge  = interaction.options.getString('badge') || 'Novo';
+        const v = versoes.find(v => v.versao === versao);
+        if (!v) return await interaction.editReply({ content: `⚠️ *Versão ${versao} não encontrada. Use /roadmap adicionar primeiro.*` });
+        v.itens = v.itens || [];
+        v.itens.push({ texto, badge, concluido: false });
+        await salvarRoadmap(versoes);
+        await interaction.editReply({ content: `✅ *Item adicionado em ${versao}:* ${texto}` });
+      }
+
+      else if (sub === 'concluir') {
+        const versao = interaction.options.getString('versao');
+        const itemBusca = interaction.options.getString('item').toLowerCase();
+        const v = versoes.find(v => v.versao === versao);
+        if (!v) return await interaction.editReply({ content: `⚠️ *Versão ${versao} não encontrada.*` });
+        const item = v.itens?.find(i => i.texto.toLowerCase().includes(itemBusca));
+        if (!item) return await interaction.editReply({ content: `⚠️ *Item não encontrado. Verifica o texto.*` });
+        item.concluido = true;
+        await salvarRoadmap(versoes);
+        await interaction.editReply({ content: `✓ *Item marcado como concluído em ${versao}:* ${item.texto}` });
+      }
+
+      else if (sub === 'status') {
+        const versao = interaction.options.getString('versao');
+        const status = interaction.options.getString('status');
+        const v = versoes.find(v => v.versao === versao);
+        if (!v) return await interaction.editReply({ content: `⚠️ *Versão ${versao} não encontrada.*` });
+        v.status = status;
+        await salvarRoadmap(versoes);
+        await interaction.editReply({ content: `⚡ *Status de ${versao} atualizado para: ${status}*` });
+      }
+    } catch (err) {
+      console.error('Erro no roadmap:', err.message);
+      await interaction.editReply({ content: '⚠️ *Os ventos do Érebo interferiram. Tente novamente.*' });
     }
     return;
   }
