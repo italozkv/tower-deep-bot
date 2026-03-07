@@ -9,6 +9,12 @@ const {
   TextInputStyle,
   ActionRowBuilder,
   PermissionFlagsBits,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+  ChannelType,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
 } = require('discord.js');
 const https = require('https');
 const http  = require('http');  // ← servidor de tokens
@@ -29,6 +35,9 @@ const CONFIG = {
   CARGO_ADMIN:      process.env.CARGO_ADMIN,
   CARGO_MOD:        process.env.CARGO_MOD,
   CARGO_EQUIPE:     process.env.CARGO_EQUIPE,
+  // Sistema de tickets — adicione no Railway
+  CATEGORIA_TICKETS: process.env.CATEGORIA_TICKETS, // ID da categoria onde os tickets serão criados
+  CANAL_LOG_TICKETS: process.env.CANAL_LOG_TICKETS,  // Canal para log/transcrições de tickets
 };
 
 const missingVars = [];
@@ -702,6 +711,294 @@ async function processarEtapa(message) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// SISTEMA DE TICKETS
+// ─────────────────────────────────────────────────────────────
+
+// Mapa em memória: channelId → dados do ticket
+const ticketsAtivos = new Map();
+
+// Contador persistente de tickets
+let ticketContador = 1;
+
+async function carregarTickets() {
+  const dados = await lerArquivoJsonDoGist('tickets.json', { contador: 1, tickets: [] });
+  ticketContador = dados.contador || 1;
+  for (const t of (dados.tickets || [])) {
+    if (t.status !== 'fechado') ticketsAtivos.set(t.channelId, t);
+  }
+  console.log(`🎫 Tickets carregados — ${ticketsAtivos.size} aberto(s), contador: ${ticketContador}`);
+}
+
+async function salvarTickets() {
+  const lista = [...ticketsAtivos.values()];
+  return salvarArquivoJsonNoGist('tickets.json', { contador: ticketContador, tickets: lista });
+}
+
+// Categorias de ticket
+const CATEGORIAS_TICKET = {
+  suporte:   { label: '🛠️ Suporte',    emoji: '🛠️', cor: 0x4a9eff, descricao: 'Dúvidas e ajuda geral com o jogo' },
+  bug:       { label: '🐛 Bug',         emoji: '🐛', cor: 0xff5a5a, descricao: 'Reportar um bug ou problema técnico' },
+  apelacao:  { label: '⚖️ Apelação',   emoji: '⚖️', cor: 0xf0c060, descricao: 'Recorrer de uma punição recebida' },
+  parceria:  { label: '🤝 Parceria',   emoji: '🤝', cor: 0x3dd68c, descricao: 'Proposta de parceria ou colaboração' },
+  outro:     { label: '📜 Outro',       emoji: '📜', cor: 0xa78bfa, descricao: 'Outros assuntos não listados acima' },
+};
+
+// Notas de avaliação
+const AVALIACOES = {
+  '⭐': 1, '⭐⭐': 2, '⭐⭐⭐': 3, '⭐⭐⭐⭐': 4, '⭐⭐⭐⭐⭐': 5,
+};
+
+// Envia o painel de abertura de tickets para um canal
+async function enviarPainelTicket(channel) {
+  const embed = new EmbedBuilder()
+    .setColor(0xc9a84c)
+    .setTitle('⚡ TRIBUNAL DO OLIMPO — Suporte')
+    .setDescription(
+      '*Os deuses do Olimpo estão prontos para te ouvir, mortal.*\n\n' +
+      '**Selecione o assunto do teu chamado** no menu abaixo.\n' +
+      'Uma câmara privada será aberta somente para ti e nossa equipe.\n\n' +
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+      '🛠️ **Suporte** — Dúvidas e ajuda geral\n' +
+      '🐛 **Bug** — Problemas e erros no jogo\n' +
+      '⚖️ **Apelação** — Recorrer de punições\n' +
+      '🤝 **Parceria** — Propostas e colaborações\n' +
+      '📜 **Outro** — Demais assuntos\n' +
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+    )
+    .setFooter({ text: 'Tower Deep · Não abra tickets desnecessários.' })
+    .setTimestamp();
+
+  const menu = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('ticket_criar')
+      .setPlaceholder('⚡ Selecione o assunto do teu chamado...')
+      .addOptions(
+        Object.entries(CATEGORIAS_TICKET).map(([value, cat]) =>
+          new StringSelectMenuOptionBuilder()
+            .setLabel(cat.label)
+            .setDescription(cat.descricao)
+            .setValue(value)
+            .setEmoji(cat.emoji)
+        )
+      )
+  );
+
+  await channel.send({ embeds: [embed], components: [menu] });
+}
+
+// Abre o canal do ticket
+async function abrirTicket(interaction, categoria) {
+  const guild   = interaction.guild;
+  const user    = interaction.user;
+  const catInfo = CATEGORIAS_TICKET[categoria];
+
+  // Verifica se o usuário já tem um ticket aberto
+  const ticketExistente = [...ticketsAtivos.values()].find(
+    t => t.userId === user.id && t.status === 'aberto'
+  );
+  if (ticketExistente) {
+    const canalExistente = guild.channels.cache.get(ticketExistente.channelId);
+    return interaction.reply({
+      content: `⚠️ *Mortal, tu já tens uma câmara aberta!* ${canalExistente ? `→ ${canalExistente}` : ''}\n*Resolve o chamado atual antes de abrir outro.*`,
+      ephemeral: true,
+    });
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  // Monta permissões do canal
+  const permissoes = [
+    { id: guild.id,  deny:  [PermissionFlagsBits.ViewChannel] }, // @everyone não vê
+    { id: user.id,   allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+  ];
+  // Dono, Admin, Mod, Equipe veem o canal
+  for (const [chave, id] of Object.entries({ CARGO_DONO: CONFIG.CARGO_DONO, CARGO_ADMIN: CONFIG.CARGO_ADMIN, CARGO_MOD: CONFIG.CARGO_MOD, CARGO_EQUIPE: CONFIG.CARGO_EQUIPE })) {
+    if (id) permissoes.push({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages] });
+  }
+
+  const numero = ticketContador++;
+  const nomeCanal = `ticket-${numero.toString().padStart(4, '0')}-${user.username.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12)}`;
+
+  let canal;
+  try {
+    const options = {
+      name: nomeCanal,
+      type: ChannelType.GuildText,
+      permissionOverwrites: permissoes,
+      topic: `${catInfo.emoji} ${catInfo.label} | ${user.tag} | Ticket #${numero}`,
+    };
+    if (CONFIG.CATEGORIA_TICKETS) options.parent = CONFIG.CATEGORIA_TICKETS;
+    canal = await guild.channels.create(options);
+  } catch (err) {
+    console.error('Erro ao criar canal de ticket:', err.message);
+    return interaction.editReply({ content: '⚠️ *Os deuses não conseguiram abrir a câmara. Verifique as permissões do bot.*' });
+  }
+
+  // Registra o ticket
+  const ticket = {
+    id:          numero,
+    channelId:   canal.id,
+    userId:      user.id,
+    username:    user.tag,
+    categoria,
+    status:      'aberto',
+    abertoPor:   user.id,
+    criadoEm:    Date.now(),
+    fechadoEm:   null,
+    resolvidoPor: null,
+    avaliacao:   null,
+    mensagens:   [],
+  };
+  ticketsAtivos.set(canal.id, ticket);
+  salvarTickets().catch(err => console.error('Erro ao salvar tickets:', err.message));
+
+  // Embed de abertura no canal do ticket
+  const embedAbertura = new EmbedBuilder()
+    .setColor(catInfo.cor)
+    .setTitle(`${catInfo.emoji} Ticket #${numero} — ${catInfo.label}`)
+    .setDescription(
+      `Bem-vindo, ${user}!\n\n*Os deuses do Olimpo te ouvem, mortal.*\n\n` +
+      `**Descreve teu problema com o máximo de detalhes possível.**\n` +
+      `Nossa equipe responderá o mais breve possível.\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📋 **Categoria:** ${catInfo.label}\n` +
+      `👤 **Aberto por:** ${user.tag}\n` +
+      `🕐 **Aberto em:** <t:${Math.floor(Date.now() / 1000)}:F>\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+    )
+    .setFooter({ text: 'Use os botões abaixo para gerenciar este ticket.' });
+
+  // Botões de controle
+  const botoesControle = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('ticket_fechar').setLabel('🔒 Fechar Ticket').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('ticket_resolver').setLabel('✅ Marcar Resolvido').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('ticket_assumir').setLabel('⚔️ Assumir').setStyle(ButtonStyle.Secondary),
+  );
+
+  await canal.send({ content: `${user} | <@&${CONFIG.CARGO_SUPORTE || CONFIG.CARGO_MOD || ''}>`, embeds: [embedAbertura], components: [botoesControle] });
+
+  await interaction.editReply({
+    content: `${catInfo.emoji} *A câmara foi aberta, mortal!* → ${canal}\n*Dirija-se até lá para falar com nossa equipe.*`,
+  });
+
+  // Log no canal de logs
+  await logTicket(guild, `🎫 **Ticket Aberto** — #${numero}\n👤 **Usuário:** ${user.tag}\n📋 **Categoria:** ${catInfo.label}\n📌 **Canal:** ${canal}`);
+}
+
+// Fecha o ticket (com transcrição)
+async function fecharTicket(interaction, ticket) {
+  const guild = interaction.guild;
+  const canal = interaction.channel;
+
+  if (ticket.status === 'fechado') {
+    return interaction.reply({ content: '⚠️ *Este ticket já está fechado.*', ephemeral: true });
+  }
+
+  await interaction.deferReply();
+
+  // Coleta transcrição
+  let transcricao = `📜 TRANSCRIÇÃO — Ticket #${ticket.id}\n`;
+  transcricao    += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  transcricao    += `👤 Aberto por: ${ticket.username}\n`;
+  transcricao    += `📋 Categoria: ${CATEGORIAS_TICKET[ticket.categoria]?.label || ticket.categoria}\n`;
+  transcricao    += `🕐 Aberto em: ${new Date(ticket.criadoEm).toLocaleString('pt-BR')}\n`;
+  transcricao    += `🔒 Fechado em: ${new Date().toLocaleString('pt-BR')}\n`;
+  transcricao    += `🔒 Fechado por: ${interaction.user.tag}\n`;
+  transcricao    += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+  try {
+    const msgs = await canal.messages.fetch({ limit: 100 });
+    const msgsOrdenadas = [...msgs.values()].reverse();
+    for (const m of msgsOrdenadas) {
+      if (m.author.bot && m.embeds.length > 0) continue;
+      transcricao += `[${new Date(m.createdTimestamp).toLocaleTimeString('pt-BR')}] ${m.author.tag}: ${m.content || '[embed/arquivo]'}\n`;
+    }
+  } catch { transcricao += '*(Não foi possível coletar mensagens)*\n'; }
+
+  // Atualiza status
+  ticket.status    = 'fechado';
+  ticket.fechadoEm = Date.now();
+  ticketsAtivos.delete(canal.id);
+  await salvarTickets().catch(() => {});
+
+  // Embed de fechamento
+  const embedFechado = new EmbedBuilder()
+    .setColor(0x555555)
+    .setTitle(`🔒 Ticket #${ticket.id} Fechado`)
+    .setDescription(
+      `*A câmara foi selada pelos deuses do Olimpo.*\n\n` +
+      `**Fechado por:** ${interaction.user.tag}\n` +
+      `**Fechado em:** <t:${Math.floor(Date.now() / 1000)}:F>\n\n` +
+      `*O canal será deletado em 10 segundos.*`
+    )
+    .setColor(0x555555);
+
+  await interaction.editReply({ embeds: [embedFechado] });
+
+  // Envia transcrição para o usuário (DM)
+  try {
+    const userObj = await guild.members.fetch(ticket.userId);
+    if (userObj) {
+      await userObj.send({
+        content: `🔒 **Teu ticket #${ticket.id} foi fechado.**\n\nSegue a transcrição da conversa:\n\`\`\`\n${transcricao.slice(0, 1800)}\n\`\`\``,
+      });
+
+      // Envia avaliação por DM
+      await enviarAvaliacaoDM(userObj.user, ticket);
+    }
+  } catch { /* DM bloqueada */ }
+
+  // Log + transcrição completa
+  await logTicket(guild,
+    `🔒 **Ticket Fechado** — #${ticket.id}\n👤 **Usuário:** ${ticket.username}\n🔒 **Fechado por:** ${interaction.user.tag}`,
+    transcricao
+  );
+
+  // Deleta o canal após 10 segundos
+  setTimeout(() => canal.delete(`Ticket #${ticket.id} fechado`).catch(() => {}), 10000);
+}
+
+// Envia DM de avaliação ao usuário
+async function enviarAvaliacaoDM(user, ticket) {
+  try {
+    const embed = new EmbedBuilder()
+      .setColor(0xc9a84c)
+      .setTitle('⭐ Avalie o Atendimento — Tower Deep')
+      .setDescription(
+        `*Teu ticket #${ticket.id} foi encerrado.*\n\n` +
+        `Como foi o atendimento da nossa equipe?\n` +
+        `Seleciona uma nota abaixo — tua opinião é divina para nós! 🙏`
+      )
+      .setFooter({ text: 'Tower Deep · Avaliação expira em 24h' });
+
+    const botoesAvaliacao = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`avaliar_1_${ticket.id}`).setLabel('⭐').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`avaliar_2_${ticket.id}`).setLabel('⭐⭐').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`avaliar_3_${ticket.id}`).setLabel('⭐⭐⭐').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`avaliar_4_${ticket.id}`).setLabel('⭐⭐⭐⭐').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`avaliar_5_${ticket.id}`).setLabel('⭐⭐⭐⭐⭐').setStyle(ButtonStyle.Primary),
+    );
+
+    await user.send({ embeds: [embed], components: [botoesAvaliacao] });
+  } catch { /* DM bloqueada */ }
+}
+
+// Registra log no canal de logs
+async function logTicket(guild, mensagem, transcricao = null) {
+  if (!CONFIG.CANAL_LOG_TICKETS) return;
+  try {
+    const canalLog = await guild.channels.fetch(CONFIG.CANAL_LOG_TICKETS);
+    if (!canalLog?.isTextBased()) return;
+    await canalLog.send(mensagem);
+    if (transcricao && transcricao.length > 0) {
+      const partes = [];
+      for (let i = 0; i < transcricao.length; i += 1900) partes.push(transcricao.slice(i, i + 1900));
+      for (const parte of partes) await canalLog.send(`\`\`\`\n${parte}\n\`\`\``).catch(() => {});
+    }
+  } catch (err) { console.error('Erro ao logar ticket:', err.message); }
+}
+
+// ─────────────────────────────────────────────────────────────
 // SLASH COMMANDS
 // ─────────────────────────────────────────────────────────────
 const slashCommands = [
@@ -746,6 +1043,17 @@ const slashCommands = [
       .addStringOption(opt => opt.setName('versao').setDescription('Versão (ex: v0.4)').setRequired(true))
       .addStringOption(opt => opt.setName('status').setDescription('Novo status').setRequired(true)
         .addChoices({ name: '✓ Concluído', value: 'done' },{ name: '⚡ Em Desenvolvimento', value: 'active' },{ name: '◇ Planejado', value: 'planned' },{ name: '◇ Futuro', value: 'future' }))),
+  new SlashCommandBuilder()
+    .setName('ticket').setDescription('🎫 Sistema de tickets de suporte')
+    .addSubcommand(sub => sub.setName('painel').setDescription('📋 Enviar painel de abertura de tickets para este canal (staff)'))
+    .addSubcommand(sub => sub.setName('fechar').setDescription('🔒 Fechar o ticket atual'))
+    .addSubcommand(sub => sub.setName('resolver').setDescription('✅ Marcar ticket como resolvido'))
+    .addSubcommand(sub => sub.setName('assumir').setDescription('⚔️ Assumir o atendimento deste ticket'))
+    .addSubcommand(sub => sub.setName('add').setDescription('➕ Adicionar usuário ao ticket')
+      .addUserOption(opt => opt.setName('usuario').setDescription('Usuário a adicionar').setRequired(true)))
+    .addSubcommand(sub => sub.setName('remove').setDescription('➖ Remover usuário do ticket')
+      .addUserOption(opt => opt.setName('usuario').setDescription('Usuário a remover').setRequired(true)))
+    .addSubcommand(sub => sub.setName('listar').setDescription('📜 Listar todos os tickets abertos (staff)')),
 ].map(cmd => cmd.toJSON());
 
 async function registrarSlashCommands(clientId) {
@@ -951,6 +1259,194 @@ client.on('interactionCreate', async (interaction) => {
       });
       return;
     }
+
+    // ──────────────────────────────────────────────────────────
+    // SISTEMA DE TICKETS
+    // ──────────────────────────────────────────────────────────
+
+    // Select menu — abrir ticket
+    if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_criar') {
+      const categoria = interaction.values[0];
+      return abrirTicket(interaction, categoria);
+    }
+
+    // /ticket
+    if (interaction.isChatInputCommand() && interaction.commandName === 'ticket') {
+      const sub = interaction.options.getSubcommand();
+
+      // /ticket painel — envia painel no canal (apenas staff)
+      if (sub === 'painel') {
+        if (!temPermissaoModeracao(interaction)) {
+          return interaction.reply({ content: '⚠️ *Apenas guardiões do Olimpo podem invocar o painel de tickets.*', ephemeral: true });
+        }
+        await enviarPainelTicket(interaction.channel);
+        return interaction.reply({ content: '✅ *Painel de tickets proclamado no canal!*', ephemeral: true });
+      }
+
+      // /ticket listar — lista tickets abertos
+      if (sub === 'listar') {
+        if (!temPermissaoModeracao(interaction)) {
+          return interaction.reply({ content: '⚠️ *Apenas guardiões do Olimpo podem ver esta lista.*', ephemeral: true });
+        }
+        const lista = [...ticketsAtivos.values()].filter(t => t.status === 'aberto');
+        if (!lista.length) return interaction.reply({ content: '✅ *Nenhum ticket aberto no momento. Os salões do Olimpo estão em paz.*', ephemeral: true });
+        const texto = lista.map(t => {
+          const canalRef = interaction.guild.channels.cache.get(t.channelId);
+          const cat = CATEGORIAS_TICKET[t.categoria]?.emoji || '📜';
+          const mins = Math.floor((Date.now() - t.criadoEm) / 60000);
+          const tempo = mins < 60 ? `${mins}min` : `${Math.floor(mins/60)}h${mins%60}min`;
+          return `${cat} **#${t.id}** — ${t.username} — ${t.categoria} — aberto há ${tempo} ${canalRef ? `→ ${canalRef}` : ''}`;
+        }).join('\n');
+        return interaction.reply({
+          content: `📜 **TICKETS ABERTOS — ${lista.length} chamado(s)**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${texto}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+          ephemeral: true,
+        });
+      }
+
+      // Comandos que exigem estar dentro de um canal de ticket
+      const ticket = ticketsAtivos.get(interaction.channelId);
+      if (!ticket) {
+        return interaction.reply({ content: '⚠️ *Este comando só funciona dentro de um canal de ticket.*', ephemeral: true });
+      }
+
+      // /ticket fechar
+      if (sub === 'fechar') {
+        const ehDono    = ticket.userId === interaction.user.id;
+        const ehStaff   = temPermissaoModeracao(interaction);
+        if (!ehDono && !ehStaff) return interaction.reply({ content: '⚠️ *Apenas o criador do ticket ou staff pode fechá-lo.*', ephemeral: true });
+        return fecharTicket(interaction, ticket);
+      }
+
+      // /ticket resolver
+      if (sub === 'resolver') {
+        if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas staff pode marcar como resolvido.*', ephemeral: true });
+        ticket.status      = 'resolvido';
+        ticket.resolvidoPor = interaction.user.tag;
+        await salvarTickets().catch(() => {});
+        const embedResolvido = new EmbedBuilder()
+          .setColor(0x3dd68c)
+          .setTitle(`✅ Ticket #${ticket.id} Resolvido`)
+          .setDescription(`*Os deuses declararam este chamado solucionado.*\n\n**Resolvido por:** ${interaction.user.tag}\n\nO ticket será fechado em breve.\n*Usa \`/ticket fechar\` para encerrar ou aguarda o criador confirmar.*`);
+        await interaction.reply({ embeds: [embedResolvido] });
+        await logTicket(interaction.guild, `✅ **Ticket Resolvido** — #${ticket.id}\n👤 **Usuário:** ${ticket.username}\n✅ **Resolvido por:** ${interaction.user.tag}`);
+        return;
+      }
+
+      // /ticket assumir
+      if (sub === 'assumir') {
+        if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas staff pode assumir um ticket.*', ephemeral: true });
+        ticket.assumidoPor = interaction.user.tag;
+        await salvarTickets().catch(() => {});
+        await interaction.reply({
+          content: `⚔️ **${interaction.user} assumiu o atendimento deste ticket.**\n*${interaction.user.username} é o guardião responsável por este chamado.*`,
+        });
+        return;
+      }
+
+      // /ticket add
+      if (sub === 'add') {
+        if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas staff pode adicionar usuários ao ticket.*', ephemeral: true });
+        const usuario = interaction.options.getUser('usuario');
+        await interaction.channel.permissionOverwrites.edit(usuario.id, {
+          ViewChannel: true, SendMessages: true, ReadMessageHistory: true,
+        });
+        return interaction.reply({ content: `✅ *${usuario} foi adicionado à câmara.*` });
+      }
+
+      // /ticket remove
+      if (sub === 'remove') {
+        if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas staff pode remover usuários do ticket.*', ephemeral: true });
+        const usuario = interaction.options.getUser('usuario');
+        if (usuario.id === ticket.userId) return interaction.reply({ content: '⚠️ *Não podes remover o criador do ticket.*', ephemeral: true });
+        await interaction.channel.permissionOverwrites.edit(usuario.id, { ViewChannel: false });
+        return interaction.reply({ content: `✅ *${usuario} foi removido da câmara.*` });
+      }
+    }
+
+    // Botão — fechar ticket
+    if (interaction.isButton() && interaction.customId === 'ticket_fechar') {
+      const ticket = ticketsAtivos.get(interaction.channelId);
+      if (!ticket) return interaction.reply({ content: '⚠️ *Ticket não encontrado.*', ephemeral: true });
+      const ehDono  = ticket.userId === interaction.user.id;
+      const ehStaff = temPermissaoModeracao(interaction);
+      if (!ehDono && !ehStaff) return interaction.reply({ content: '⚠️ *Apenas o criador do ticket ou staff pode fechá-lo.*', ephemeral: true });
+      return fecharTicket(interaction, ticket);
+    }
+
+    // Botão — resolver ticket
+    if (interaction.isButton() && interaction.customId === 'ticket_resolver') {
+      const ticket = ticketsAtivos.get(interaction.channelId);
+      if (!ticket) return interaction.reply({ content: '⚠️ *Ticket não encontrado.*', ephemeral: true });
+      if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas staff pode marcar como resolvido.*', ephemeral: true });
+      ticket.status       = 'resolvido';
+      ticket.resolvidoPor = interaction.user.tag;
+      await salvarTickets().catch(() => {});
+      const embedResolvido = new EmbedBuilder()
+        .setColor(0x3dd68c)
+        .setTitle(`✅ Ticket #${ticket.id} Resolvido`)
+        .setDescription(`*Os deuses declararam este chamado solucionado.*\n\n**Resolvido por:** ${interaction.user.tag}\n\n*Usa \`/ticket fechar\` ou o botão 🔒 para encerrar o ticket.*`);
+      await interaction.reply({ embeds: [embedResolvido] });
+      await logTicket(interaction.guild, `✅ **Ticket Resolvido** — #${ticket.id}\n👤 **Usuário:** ${ticket.username}\n✅ **Resolvido por:** ${interaction.user.tag}`);
+      return;
+    }
+
+    // Botão — assumir ticket
+    if (interaction.isButton() && interaction.customId === 'ticket_assumir') {
+      const ticket = ticketsAtivos.get(interaction.channelId);
+      if (!ticket) return interaction.reply({ content: '⚠️ *Ticket não encontrado.*', ephemeral: true });
+      if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas staff pode assumir um ticket.*', ephemeral: true });
+      ticket.assumidoPor = interaction.user.tag;
+      await salvarTickets().catch(() => {});
+      await interaction.reply({
+        content: `⚔️ **${interaction.user} assumiu o atendimento deste ticket.**\n*${interaction.user.username} é o guardião responsável por este chamado.*`,
+      });
+      return;
+    }
+
+    // Botão — avaliação (chega via DM)
+    if (interaction.isButton() && interaction.customId.startsWith('avaliar_')) {
+      const partes  = interaction.customId.split('_'); // avaliar_NOTA_TICKETID
+      const nota    = parseInt(partes[1]);
+      const ticketId = parseInt(partes[2]);
+
+      const estrelas = '⭐'.repeat(nota);
+      const msgs     = ['', '😔 Lamentamos não ter ajudado bem...', '😐 Obrigado pelo retorno, melhoraremos!', '🙂 Que bom que ajudamos!', '😊 Fico feliz que tenha gostado!', '🌟 Os deuses do Olimpo agradecem, mortal!'];
+
+      await interaction.reply({
+        content: `${estrelas} *Avaliação registrada! ${msgs[nota]}*\n*Obrigado por jogar Tower Deep!* 🔱`,
+        ephemeral: false,
+      });
+
+      // Desativa os botões de avaliação
+      const rowDesativada = new ActionRowBuilder().addComponents(
+        [1,2,3,4,5].map(n =>
+          new ButtonBuilder()
+            .setCustomId(`avaliar_${n}_${ticketId}_done`)
+            .setLabel('⭐'.repeat(n))
+            .setStyle(n === nota ? ButtonStyle.Primary : ButtonStyle.Secondary)
+            .setDisabled(true)
+        )
+      );
+      await interaction.message.edit({ components: [rowDesativada] }).catch(() => {});
+
+      // Log da avaliação
+      if (CONFIG.CANAL_LOG_TICKETS) {
+        try {
+          const guilds = client.guilds.cache.values();
+          for (const g of guilds) {
+            const canalLog = g.channels.cache.get(CONFIG.CANAL_LOG_TICKETS);
+            if (canalLog) {
+              await canalLog.send(
+                `⭐ **Avaliação Recebida** — Ticket #${ticketId}\n👤 **Usuário:** ${interaction.user.tag}\n${estrelas} **Nota:** ${nota}/5\n${msgs[nota]}`
+              );
+              break;
+            }
+          }
+        } catch { /* silencioso */ }
+      }
+      return;
+    }
+
   } catch (err) {
     console.error('Erro em interactionCreate:', err);
     if (interaction.isRepliable()) {
@@ -967,10 +1463,13 @@ client.once('ready', async () => {
   console.log(`\n🔱 Tower Deep Bot online — ${client.user.tag}`);
   await registrarSlashCommands(client.user.id);
   await carregarXP();
+  await carregarTickets();
   console.log(`🤖 IA (Oráculo):    ${CONFIG.GROK_KEY ? '✅ Ativada (Grok)' : '❌ DESATIVADA — adicione GROK_KEY'}`);
   console.log(`📜 Canal updates:   ${CONFIG.CANAL_UPDATE_ID  || '❌ não configurado'}`);
   console.log(`📢 Canal anúncios:  ${CONFIG.CANAL_ANUNCIO_ID || '❌ não configurado'}`);
   console.log(`🐛 Canal bugs:      ${CONFIG.CANAL_BUGS_ID    || '❌ não configurado'}`);
+  console.log(`🎫 Categoria tickets: ${CONFIG.CATEGORIA_TICKETS || '❌ não configurado (tickets criados na raiz)'}`);
+  console.log(`📋 Log de tickets:  ${CONFIG.CANAL_LOG_TICKETS || '❌ não configurado'}`);
   console.log(`🔑 Token cargos:    Dono=${CONFIG.CARGO_DONO ? '✅' : '❌'} Admin=${CONFIG.CARGO_ADMIN ? '✅' : '❌'} Mod=${CONFIG.CARGO_MOD ? '✅' : '❌'} Equipe=${CONFIG.CARGO_EQUIPE ? '✅' : '❌'}\n`);
 });
 
