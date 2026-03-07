@@ -18,6 +18,8 @@ const {
 } = require('discord.js');
 const https = require('https');
 const http  = require('http');  // ← servidor de tokens
+const fs = require('fs');
+const path = require('path');
 
 // ─────────────────────────────────────────────────────────────
 // CONFIG
@@ -479,15 +481,100 @@ const RARIDADE_EMOJI = {
   Comum:'⚪',  Incomum:'🟢',  Raro:'🔵', Epico:'🟣', Lendario:'🟡', Primordial:'💀', Variavel:'⬜',
 };
 
+let catalogoAutoCache = null;
+let catalogoAutoCacheAt = 0;
+
+function getPathsCatalogoLua() {
+  const baseSrc = path.resolve(__dirname, '..');
+  return {
+    itemConfig: path.resolve(baseSrc, 'ReplicatedStorage', 'Modules', 'Config', 'ItemConfig.lua'),
+    semideusConfig: path.resolve(baseSrc, 'ReplicatedStorage', 'Modules', 'Config', 'SemideusItemConfig.lua'),
+  };
+}
+
+function parseCatalogoItemConfigLua(luaText) {
+  const out = [];
+  const blockMatch = luaText.match(/ItemConfig\.Items\s*=\s*\{([\s\S]*?)\}\s*\n\s*--\s*═|ItemConfig\.Items\s*=\s*\{([\s\S]*?)\}\s*\n\s*--\s*═/);
+  const block = blockMatch?.[1] || blockMatch?.[2] || luaText;
+  const itemRe = /\{[\s\S]*?\bId\s*=\s*"([^"]+)"[\s\S]*?\bName\s*=\s*"([^"]+)"[\s\S]*?\bRarity\s*=\s*"([^"]+)"[\s\S]*?\bCategory\s*=\s*"([^"]+)"[\s\S]*?\}/g;
+  let m;
+  while ((m = itemRe.exec(block))) {
+    const id = m[1];
+    const nome = m[2];
+    const raridade = m[3];
+    const categoria = m[4];
+    if (!id) continue;
+    out.push({ id, nome, raridade, categoria });
+  }
+  return out;
+}
+
+function parseCatalogoSemideusLua(luaText) {
+  const out = [];
+  const grupos = [
+    { key: 'EssenciasDivinas', categoria: 'Essência' },
+    { key: 'DNACriaturas', categoria: 'DNA' },
+    { key: 'CristaisAlma', categoria: 'Cristal Alma' },
+    { key: 'Catalisadores', categoria: 'Catalisador' },
+    { key: 'ItensAuxiliares', categoria: 'Auxiliar' },
+  ];
+
+  for (const g of grupos) {
+    const listRe = new RegExp(`SemideusItemConfig\\.${g.key}\\s*=\\s*\\{([\\s\\S]*?)\\n\\}`, 'm');
+    const listMatch = luaText.match(listRe);
+    const block = listMatch?.[1] || '';
+    if (!block) continue;
+
+    const itemRe = /\{[\s\S]*?\bId\s*=\s*"([^"]+)"[\s\S]*?\bNome\s*=\s*"([^"]+)"[\s\S]*?\bRaridade\s*=\s*"([^"]+)"[\s\S]*?\}/g;
+    let m;
+    while ((m = itemRe.exec(block))) {
+      const id = m[1];
+      const nome = m[2];
+      const raridade = m[3];
+      if (!id) continue;
+      out.push({ id, nome, raridade, categoria: g.categoria });
+    }
+  }
+  return out;
+}
+
+async function getCatalogoAuto() {
+  const now = Date.now();
+  if (catalogoAutoCache && (now - catalogoAutoCacheAt) < (5 * 60 * 1000)) {
+    return catalogoAutoCache;
+  }
+
+  try {
+    const { itemConfig, semideusConfig } = getPathsCatalogoLua();
+    const [itemLua, semiLua] = await Promise.all([
+      fs.promises.readFile(itemConfig, 'utf8'),
+      fs.promises.readFile(semideusConfig, 'utf8'),
+    ]);
+    const baseItems = parseCatalogoItemConfigLua(itemLua);
+    const semiItems = parseCatalogoSemideusLua(semiLua);
+    const merged = [...baseItems, ...semiItems].filter(i => i?.id);
+    catalogoAutoCache = merged;
+    catalogoAutoCacheAt = now;
+    return merged;
+  } catch (err) {
+    console.error('[CatalogoAuto] Falha ao carregar catálogo Lua:', err?.message || err);
+    catalogoAutoCache = [];
+    catalogoAutoCacheAt = now;
+    return [];
+  }
+}
+
 // Helper — retorna lista de itens do catálogo (fixos + cadastrados) filtrados por categoria
 async function getCatalogoCompleto() {
   const db = await lerCodigos();
   const extras = db.itensExtras || [];
-  const merged = [...CATALOGO_FIXO, ...extras];
+  const auto = await getCatalogoAuto();
+  const merged = [...CATALOGO_FIXO, ...auto, ...extras];
   const dedup = new Map();
   for (const it of merged) {
     if (!it?.id) continue;
     const normalized = { ...it, categoria: normalizarCategoriaItem(it.categoria) };
+
     dedup.set(it.id, normalized);
   }
   return [...dedup.values()];
