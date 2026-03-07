@@ -155,6 +155,7 @@ function ganharXP(userId) {
   const ganho       = Math.floor(Math.random() * 6) + 5;
   const nivelAntes  = getNivel(dados.xp);
   dados.xp         += ganho;
+  dados.msgs         = (dados.msgs || 0) + 1;
   dados.lastMsg     = agora;
   const nivelDepois = getNivel(dados.xp);
   dados.nivel       = nivelDepois.nivel;
@@ -234,7 +235,7 @@ async function salvarArquivoJsonNoGist(nomeArquivo, conteudo) {
 async function carregarXP() {
   const xpJson = await lerArquivoJsonDoGist('xp-data.json', {});
   for (const [userId, dados] of Object.entries(xpJson)) {
-    xpData.set(userId, { xp: Number(dados.xp) || 0, nivel: Number(dados.nivel) || 1, lastMsg: 0 });
+    xpData.set(userId, { xp: Number(dados.xp) || 0, nivel: Number(dados.nivel) || 1, msgs: Number(dados.msgs) || 0, username: dados.username || '', lastMsg: 0 });
   }
   console.log(`✅ XP carregado — ${xpData.size} jogador(es)`);
 }
@@ -1037,6 +1038,10 @@ client.on('messageCreate', async (message) => {
 
   // XP
   if (message.guild && !ehComando) {
+    // Store username for ranking
+    if (xpData.has(message.author.id)) {
+      xpData.get(message.author.id).username = message.author.username;
+    }
     const resultado = ganharXP(message.author.id);
     if (resultado?.subiu) {
       await message.channel.send(
