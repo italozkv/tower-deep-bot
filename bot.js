@@ -29,8 +29,13 @@ const CONFIG = {
 //  REGISTRO DE SLASH COMMANDS
 // ─────────────────────────────────────────────────────────────
 const slashCommands = [
-  new SlashCommandBuilder().setName('bug').setDescription('Reportar uma anomalia divina ao Olimpo'),
-  new SlashCommandBuilder().setName('sugestao').setDescription('Enviar uma visão para os deuses do Olimpo'),
+  new SlashCommandBuilder().setName('bug').setDescription('🐛 Reportar uma anomalia divina ao Olimpo'),
+  new SlashCommandBuilder().setName('sugestao').setDescription('💡 Enviar uma visão para os deuses do Olimpo'),
+  new SlashCommandBuilder()
+    .setName('enquete')
+    .setDescription('🗳️ Convocar um julgamento divino')
+    .addStringOption(opt => opt.setName('pergunta').setDescription('A questão a ser julgada pelos mortais').setRequired(true)),
+  new SlashCommandBuilder().setName('rank').setDescription('🏆 Consultar teu título divino no Olimpo'),
 ].map(cmd => cmd.toJSON());
 
 async function registrarSlashCommands(clientId) {
@@ -554,6 +559,47 @@ client.on('interactionCreate', async (interaction) => {
     } catch (err) { console.error('Erro ao postar sugestão:', err.message); }
     return;
   }
+
+  // ── /enquete ──────────────────────────────────────────────
+  if (interaction.isChatInputCommand() && interaction.commandName === 'enquete') {
+    const pergunta = interaction.options.getString('pergunta');
+    try {
+      const msg = await interaction.channel.send(
+        '⚡ **JULGAMENTO DIVINO DO OLIMPO** ⚡\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+        `🔮 ${pergunta}\n\n` +
+        '*Os deuses aguardam o veredicto dos mortais...*\n\n' +
+        '✅ — Aprovo / A favor\n❌ — Rejeito / Contra'
+      );
+      await msg.react('✅');
+      await msg.react('❌');
+      await interaction.reply({ content: '⚡ *O julgamento divino foi convocado, mortal!*', ephemeral: true });
+    } catch (err) {
+      console.error('Erro ao criar enquete:', err.message);
+      await interaction.reply({ content: '⚠️ *As forças do Caos interferiram no julgamento.*', ephemeral: true });
+    }
+    return;
+  }
+
+  // ── /rank ─────────────────────────────────────────────────
+  if (interaction.isChatInputCommand() && interaction.commandName === 'rank') {
+    const userId = interaction.user.id;
+    if (!xpData.has(userId)) xpData.set(userId, { xp: 0, nivel: 1, lastMsg: 0 });
+    const dados = xpData.get(userId);
+    const nivel = getNivel(dados.xp);
+    const proximo = getProximoNivel(dados.xp);
+    const faltam = proximo ? proximo.xpMin - dados.xp : 0;
+    await interaction.reply({
+      content:
+        `✨ **PERGAMINHO DE ${interaction.user.username.toUpperCase()}**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `🏛️ **Título:** ${nivel.nome}\n` +
+        `⚡ **XP Total:** ${dados.xp}\n` +
+        `📊 **Nível:** ${nivel.nivel}/10\n` +
+        (proximo ? `🔮 **Próximo título:** ${proximo.nome} *(faltam ${faltam} XP)*` : `🌟 *Atingiste a divindade máxima, imortal!*`) +
+        `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      ephemeral: true,
+    });
+    return;
+  }
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -639,44 +685,8 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // ── !enquete — funciona em qualquer canal ─────────────────
-  if (texto.startsWith('!enquete ')) {
-    const pergunta = texto.slice(9).trim();
-    if (!pergunta) return message.reply('⚠️ *Os deuses precisam de uma questão para julgar, mortal. Use: `!enquete Sua pergunta aqui`*');
-    try {
-      const msg = await message.channel.send(
-        '⚡ **JULGAMENTO DIVINO DO OLIMPO** ⚡\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🔮 ' + pergunta + '\n\n*Os deuses aguardam o veredicto dos mortais...*\n\n✅ — Aprovo / A favor\n❌ — Rejeito / Contra'
-      );
-      await msg.react('✅');
-      await msg.react('❌');
-      await message.delete().catch(() => {});
-    } catch (err) {
-      console.error('Erro ao criar enquete:', err.message);
-      message.reply('⚠️ *As forças do Caos interferiram no julgamento. O Olimpo não pôde ser convocado neste momento.*');
-    }
-    return;
-  }
-
   // ── Formulário de update em andamento ────────────────────────
   if (sessoes.has(message.author.id)) return await processarEtapa(message);
-
-  // ── Comandos globais (!bug, !sugestao, !rank) ─────────────────
-  if (texto === '!rank') {
-    const userId = message.author.id;
-    if (!xpData.has(userId)) xpData.set(userId, { xp: 0, nivel: 1, lastMsg: 0 });
-    const dados = xpData.get(userId);
-    const nivel = getNivel(dados.xp);
-    const proximo = getProximoNivel(dados.xp);
-    const faltam = proximo ? proximo.xpMin - dados.xp : 0;
-    return message.reply(
-      `✨ **PERGAMINHO DE ${message.author.username.toUpperCase()}**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🏛️ **Título:** ${nivel.nome}\n` +
-      `⚡ **XP Total:** ${dados.xp}\n` +
-      `📊 **Nível:** ${nivel.nivel}/10\n` +
-      (proximo ? `🔮 **Próximo título:** ${proximo.nome} *(faltam ${faltam} XP)*` : `🌟 *Atingiste a divindade máxima, imortal!*`) +
-      `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
-    );
-  }
 
   // ── Respostas automáticas por palavras-chave ──────────────────
   const t = texto.toLowerCase();
