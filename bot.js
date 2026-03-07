@@ -21,7 +21,7 @@ const CONFIG = {
   CANAL_UPDATE_ID:  process.env.CANAL_ID,          // canal de comandos (!update)
   CANAL_ANUNCIO_ID: process.env.CANAL_ANUNCIO_ID,  // canal #anuncios
   CANAL_BUGS_ID:    process.env.CANAL_BUGS_ID,      // canal #bugs
-  ANTHROPIC_KEY:    process.env.ANTHROPIC_KEY,      // chave da API Anthropic (Claude)
+  GROK_KEY:         process.env.GROK_KEY,           // chave da API Grok (xAI)
 };
 // ─────────────────────────────────────────────────────────────
 
@@ -174,27 +174,28 @@ const TAGS = {
 };
 
 // ─────────────────────────────────────────────────────────────
-//  ANTHROPIC API (Claude)
+//  GROK API (xAI)
 // ─────────────────────────────────────────────────────────────
 function chamarClaude(mensagens, promptExtra = '') {
   return new Promise((resolve, reject) => {
     const sistema = CONHECIMENTO_DO_JOGO + (promptExtra ? '\n\n' + promptExtra : '');
 
     const body = JSON.stringify({
-      model: 'claude-haiku-4-5-20251001', // rápido e econômico — ideal para bot
+      model: 'grok-3-mini-fast',
       max_tokens: 500,
-      system: sistema,
-      messages: mensagens,
+      messages: [
+        { role: 'system', content: sistema },
+        ...mensagens,
+      ],
     });
 
     const options = {
-      hostname: 'api.anthropic.com',
-      path: '/v1/messages',
+      hostname: 'api.x.ai',
+      path: '/v1/chat/completions',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': CONFIG.ANTHROPIC_KEY,
-        'anthropic-version': '2023-06-01',
+        'Authorization': `Bearer ${CONFIG.GROK_KEY}`,
         'Content-Length': Buffer.byteLength(body),
       },
     };
@@ -205,7 +206,7 @@ function chamarClaude(mensagens, promptExtra = '') {
       res.on('end', () => {
         try {
           const json = JSON.parse(data);
-          const texto = json.content?.[0]?.text;
+          const texto = json.choices?.[0]?.message?.content;
           if (texto) resolve(texto);
           else reject(new Error('Resposta inválida: ' + data));
         } catch (e) { reject(e); }
@@ -604,7 +605,7 @@ client.on('interactionCreate', async (interaction) => {
 client.once('ready', async () => {
   console.log(`\n🔱 Tower Deep Bot online — ${client.user.tag}`);
   await registrarSlashCommands(client.user.id);
-  console.log(`🤖 IA (Oráculo): ${CONFIG.ANTHROPIC_KEY ? '✅ Ativada (Claude)' : '❌ DESATIVADA — adicione ANTHROPIC_KEY no Railway'}`);
+  console.log(`🤖 IA (Oráculo): ${CONFIG.GROK_KEY ? '✅ Ativada (Grok)' : '❌ DESATIVADA — adicione GROK_KEY no Railway'}`);
   console.log(`📜 Canal de updates: ${CONFIG.CANAL_UPDATE_ID || '❌ não configurado'}`);
   console.log(`📢 Canal de anúncios: ${CONFIG.CANAL_ANUNCIO_ID || '❌ não configurado'}`);
   console.log(`🐛 Canal de bugs: ${CONFIG.CANAL_BUGS_ID || '❌ não configurado'}\n`);
@@ -654,8 +655,8 @@ client.on('messageCreate', async (message) => {
 
   // ── IA: menção em qualquer canal ──────────────────────────
   if (mencionouBot) {
-    if (!CONFIG.ANTHROPIC_KEY) {
-      return message.reply('🌑 *O Oráculo mergulhou em sono profundo... Sua sabedoria aguarda ser despertada. Configure a variável `ANTHROPIC_KEY` no Railway para invocar sua presença.*');
+    if (!CONFIG.GROK_KEY) {
+      return message.reply('🌑 *O Oráculo mergulhou em sono profundo... Sua sabedoria aguarda ser despertada. Configure a variável `GROK_KEY` no Railway para invocar sua presença.*');
     }
     const pergunta = texto.replace(/<@!?\d+>/g, '').trim();
     if (!pergunta) {
