@@ -118,8 +118,61 @@ const sessoes = new Map();
 
 // ─────────────────────────────────────────────────────────────
 //  SISTEMA DE XP — Nível 1 a 10 com nomes de deuses gregos
+//  Persistido no Gist como arquivo separado (xp-data.json)
 // ─────────────────────────────────────────────────────────────
 const xpData = new Map(); // userId -> { xp, nivel, lastMsg }
+
+async function carregarXP() {
+  return new Promise((resolve) => {
+    https.get({
+      hostname: 'api.github.com',
+      path: `/gists/${CONFIG.GIST_ID}`,
+      headers: { 'Authorization': `token ${CONFIG.GITHUB_TOKEN}`, 'User-Agent': 'TowerDeepBot', 'Accept': 'application/vnd.github.v3+json' }
+    }, res => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try {
+          const gist = JSON.parse(data);
+          const arquivo = gist.files?.['xp-data.json'];
+          if (arquivo) {
+            const xpJson = JSON.parse(arquivo.content);
+            for (const [userId, dados] of Object.entries(xpJson)) {
+              xpData.set(userId, { ...dados, lastMsg: 0 });
+            }
+            console.log(`✅ XP carregado — ${xpData.size} jogador(es)`);
+          }
+        } catch { console.log('⚠️ Nenhum XP salvo ainda, iniciando do zero.'); }
+        resolve();
+      });
+    }).on('error', () => resolve());
+  });
+}
+
+let _xpSaveTimeout = null;
+function salvarXPDebounced() {
+  // Agrupa saves — espera 10s de inatividade antes de salvar
+  if (_xpSaveTimeout) clearTimeout(_xpSaveTimeout);
+  _xpSaveTimeout = setTimeout(() => salvarXP(), 10000);
+}
+
+async function salvarXP() {
+  const xpJson = {};
+  for (const [userId, dados] of xpData.entries()) {
+    xpJson[userId] = { xp: dados.xp, nivel: dados.nivel };
+  }
+  return new Promise((resolve) => {
+    const body = JSON.stringify({
+      files: { 'xp-data.json': { content: JSON.stringify(xpJson, null, 2) } }
+    });
+    const req = https.request({
+      hostname: 'api.github.com', path: `/gists/${CONFIG.GIST_ID}`, method: 'PATCH',
+      headers: { 'Authorization': `token ${CONFIG.GITHUB_TOKEN}`, 'User-Agent': 'TowerDeepBot', 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => resolve()); });
+    req.on('error', () => resolve());
+    req.write(body); req.end();
+  });
+}
 
 const NIVEIS = [
   { nivel: 1,  nome: 'Mortal Comum',    xpMin: 0    },
@@ -155,6 +208,8 @@ function ganharXP(userId) {
   dados.xp += ganho;
   dados.lastMsg = agora;
   const nivelDepois = getNivel(dados.xp);
+  dados.nivel = nivelDepois.nivel;
+  salvarXPDebounced(); // salva no Gist com debounce
   if (nivelDepois.nivel > nivelAntes.nivel) return { subiu: true, nivel: nivelDepois };
   return { subiu: false };
 }
@@ -425,11 +480,11 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isChatInputCommand() && interaction.commandName === 'bug') {
     const modal = new ModalBuilder()
       .setCustomId('modal_bug')
-      .setTitle('🐛 Relato de Anomalia Divina');
+      .setTitle('Relato de Anomalia Divina');
 
     const fenomeno = new TextInputBuilder()
       .setCustomId('bug_titulo')
-      .setLabel('O Fenômeno — Descreva o bug em uma frase')
+      .setLabel('O Fenomeno - Descreva o bug em uma frase')
       .setStyle(TextInputStyle.Short)
       .setPlaceholder('Ex: A torre de Zeus não ataca inimigos voadores')
       .setRequired(true)
@@ -437,7 +492,7 @@ client.on('interactionCreate', async (interaction) => {
 
     const detalhes = new TextInputBuilder()
       .setCustomId('bug_descricao')
-      .setLabel('Os Detalhes — Como reproduzir o bug?')
+      .setLabel('Os Detalhes - Como reproduzir o bug?')
       .setStyle(TextInputStyle.Paragraph)
       .setPlaceholder('Passo a passo do que aconteceu...')
       .setRequired(true)
@@ -445,7 +500,7 @@ client.on('interactionCreate', async (interaction) => {
 
     const versao = new TextInputBuilder()
       .setCustomId('bug_versao')
-      .setLabel('A Versão — Qual versão do jogo?')
+      .setLabel('A Versao - Qual versao do jogo?')
       .setStyle(TextInputStyle.Short)
       .setPlaceholder('Ex: v0.3.0 (ou "não sei")')
       .setRequired(false)
@@ -463,11 +518,11 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isChatInputCommand() && interaction.commandName === 'sugestao') {
     const modal = new ModalBuilder()
       .setCustomId('modal_sugestao')
-      .setTitle('💡 Visão para o Olimpo');
+      .setTitle('Visao para o Olimpo');
 
     const titulo = new TextInputBuilder()
       .setCustomId('sug_titulo')
-      .setLabel('O Título — Resuma sua sugestão')
+      .setLabel('O Titulo - Resuma sua sugestao')
       .setStyle(TextInputStyle.Short)
       .setPlaceholder('Ex: Torre de Artemis com flechas de gelo')
       .setRequired(true)
@@ -475,7 +530,7 @@ client.on('interactionCreate', async (interaction) => {
 
     const descricao = new TextInputBuilder()
       .setCustomId('sug_descricao')
-      .setLabel('Os Detalhes — Como funcionaria no jogo?')
+      .setLabel('Os Detalhes - Como funcionaria no jogo?')
       .setStyle(TextInputStyle.Paragraph)
       .setPlaceholder('Descreva a ideia com mais detalhes...')
       .setRequired(true)
@@ -483,7 +538,7 @@ client.on('interactionCreate', async (interaction) => {
 
     const categoria = new TextInputBuilder()
       .setCustomId('sug_categoria')
-      .setLabel('O Domínio — Categoria (torre/mapa/mecânica/evento)')
+      .setLabel('O Dominio - Categoria (torre/mapa/mecanica/evento)')
       .setStyle(TextInputStyle.Short)
       .setPlaceholder('torre, mapa, mecânica, evento ou outro')
       .setRequired(false)
@@ -585,13 +640,30 @@ client.on('interactionCreate', async (interaction) => {
     const nivel = getNivel(dados.xp);
     const proximo = getProximoNivel(dados.xp);
     const faltam = proximo ? proximo.xpMin - dados.xp : 0;
+
+    // Top 5 do servidor
+    const medalhas = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+    const top5 = [...xpData.entries()]
+      .sort((a, b) => b[1].xp - a[1].xp)
+      .slice(0, 5);
+
+    let topTexto = '';
+    for (let i = 0; i < top5.length; i++) {
+      const [uid, d] = top5[i];
+      const n = getNivel(d.xp);
+      const destaque = uid === userId ? ' ← você' : '';
+      topTexto += `${medalhas[i]} <@${uid}> — **${n.nome}** *(${d.xp} XP)*${destaque}\n`;
+    }
+
     await interaction.reply({
       content:
         `✨ **PERGAMINHO DE ${interaction.user.username.toUpperCase()}**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
         `🏛️ **Título:** ${nivel.nome}\n` +
         `⚡ **XP Total:** ${dados.xp}\n` +
         `📊 **Nível:** ${nivel.nivel}/10\n` +
-        (proximo ? `🔮 **Próximo título:** ${proximo.nome} *(faltam ${faltam} XP)*` : `🌟 *Atingiste a divindade máxima, imortal!*`) +
+        (proximo ? `🔮 **Próximo:** ${proximo.nome} *(faltam ${faltam} XP)*` : `🌟 *Atingiste a divindade máxima, imortal!*`) +
+        `\n\n🏆 **OLIMPO — Top Mortais**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        (topTexto || '*Nenhum mortal registrado ainda.*') +
         `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
       ephemeral: true,
     });
@@ -605,6 +677,7 @@ client.on('interactionCreate', async (interaction) => {
 client.once('ready', async () => {
   console.log(`\n🔱 Tower Deep Bot online — ${client.user.tag}`);
   await registrarSlashCommands(client.user.id);
+  await carregarXP();
   console.log(`🤖 IA (Oráculo): ${CONFIG.GROK_KEY ? '✅ Ativada (Grok)' : '❌ DESATIVADA — adicione GROK_KEY no Railway'}`);
   console.log(`📜 Canal de updates: ${CONFIG.CANAL_UPDATE_ID || '❌ não configurado'}`);
   console.log(`📢 Canal de anúncios: ${CONFIG.CANAL_ANUNCIO_ID || '❌ não configurado'}`);
