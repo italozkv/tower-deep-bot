@@ -21,7 +21,7 @@ const CONFIG = {
   CANAL_UPDATE_ID:  process.env.CANAL_ID,          // canal de comandos (!update)
   CANAL_ANUNCIO_ID: process.env.CANAL_ANUNCIO_ID,  // canal #anuncios
   CANAL_BUGS_ID:    process.env.CANAL_BUGS_ID,      // canal #bugs
-  OPENAI_KEY:       process.env.OPENAI_KEY,         // chave da API OpenAI (ChatGPT)
+  ANTHROPIC_KEY:    process.env.ANTHROPIC_KEY,      // chave da API Anthropic (Claude)
 };
 // ─────────────────────────────────────────────────────────────
 
@@ -174,31 +174,27 @@ const TAGS = {
 };
 
 // ─────────────────────────────────────────────────────────────
-//  OPENAI API (ChatGPT)
+//  ANTHROPIC API (Claude)
 // ─────────────────────────────────────────────────────────────
 function chamarClaude(mensagens, promptExtra = '') {
   return new Promise((resolve, reject) => {
     const sistema = CONHECIMENTO_DO_JOGO + (promptExtra ? '\n\n' + promptExtra : '');
 
-    // OpenAI espera o system como primeira mensagem com role "system"
-    const mensagensComSistema = [
-      { role: 'system', content: sistema },
-      ...mensagens,
-    ];
-
     const body = JSON.stringify({
-      model: 'gpt-4o-mini', // rápido, barato e poderoso — ideal para bot
+      model: 'claude-haiku-4-5-20251001', // rápido e econômico — ideal para bot
       max_tokens: 500,
-      messages: mensagensComSistema,
+      system: sistema,
+      messages: mensagens,
     });
 
     const options = {
-      hostname: 'api.openai.com',
-      path: '/v1/chat/completions',
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${CONFIG.OPENAI_KEY}`,
+        'x-api-key': CONFIG.ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
         'Content-Length': Buffer.byteLength(body),
       },
     };
@@ -209,7 +205,7 @@ function chamarClaude(mensagens, promptExtra = '') {
       res.on('end', () => {
         try {
           const json = JSON.parse(data);
-          const texto = json.choices?.[0]?.message?.content;
+          const texto = json.content?.[0]?.text;
           if (texto) resolve(texto);
           else reject(new Error('Resposta inválida: ' + data));
         } catch (e) { reject(e); }
@@ -608,7 +604,7 @@ client.on('interactionCreate', async (interaction) => {
 client.once('ready', async () => {
   console.log(`\n🔱 Tower Deep Bot online — ${client.user.tag}`);
   await registrarSlashCommands(client.user.id);
-  console.log(`🤖 IA (Oráculo): ${CONFIG.OPENAI_KEY ? '✅ Ativada' : '❌ DESATIVADA — adicione OPENAI_KEY no Railway'}`);
+  console.log(`🤖 IA (Oráculo): ${CONFIG.ANTHROPIC_KEY ? '✅ Ativada (Claude)' : '❌ DESATIVADA — adicione ANTHROPIC_KEY no Railway'}`);
   console.log(`📜 Canal de updates: ${CONFIG.CANAL_UPDATE_ID || '❌ não configurado'}`);
   console.log(`📢 Canal de anúncios: ${CONFIG.CANAL_ANUNCIO_ID || '❌ não configurado'}`);
   console.log(`🐛 Canal de bugs: ${CONFIG.CANAL_BUGS_ID || '❌ não configurado'}\n`);
@@ -658,8 +654,8 @@ client.on('messageCreate', async (message) => {
 
   // ── IA: menção em qualquer canal ──────────────────────────
   if (mencionouBot) {
-    if (!CONFIG.OPENAI_KEY) {
-      return message.reply('🌑 *O Oráculo mergulhou em sono profundo... Sua sabedoria aguarda ser despertada. Configure a variável `OPENAI_KEY` no Railway para invocar sua presença.*');
+    if (!CONFIG.ANTHROPIC_KEY) {
+      return message.reply('🌑 *O Oráculo mergulhou em sono profundo... Sua sabedoria aguarda ser despertada. Configure a variável `ANTHROPIC_KEY` no Railway para invocar sua presença.*');
     }
     const pergunta = texto.replace(/<@!?\d+>/g, '').trim();
     if (!pergunta) {
