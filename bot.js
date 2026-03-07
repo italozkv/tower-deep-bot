@@ -629,7 +629,7 @@ async function iniciarFormulario(message) {
   const userId = message.author.id;
   if (sessoes.has(userId)) return message.reply('⚠️ *Mortal, um decreto já está sendo redigido! Proclama `cancelar` para encerrar o ritual atual antes de iniciar outro.*');
   sessoes.set(userId, { etapa: 'versao', dados: {} });
-  await message.reply('⚡ **OS DEUSES CONVOCAM UM NOVO DECRETO**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Os pergaminhos do Olimpo aguardam suas palavras...*\n\nDigite `cancelar` a qualquer momento para silenciar os deuses.\n\n**— Pergaminho I de VI — A Versão —**\nQual selo carregará este decreto? *(ex: v0.4.0)*');
+  await message.reply('⚡ **OS DEUSES CONVOCAM UM NOVO DECRETO**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Os pergaminhos do Olimpo aguardam suas palavras...*\n\nDigite `cancelar` a qualquer momento para silenciar os deuses.\n\n**— Pergaminho I de VII — A Versão —**\nQual selo carregará este decreto? *(ex: v0.4.0)*');
 }
 
 async function processarEtapa(message) {
@@ -640,28 +640,45 @@ async function processarEtapa(message) {
   if (texto.toLowerCase() === 'cancelar') { sessoes.delete(userId); return message.reply('🌑 *Os pergaminhos foram lançados às chamas... O decreto foi esquecido pelos deuses.*'); }
   const { etapa, dados } = sessao;
 
-  if (etapa === 'versao') { dados.versao = texto.startsWith('v') ? texto : `v${texto}`; sessao.etapa = 'titulo'; return message.reply('⚡ *O selo foi gravado nos pergaminhos.*\n\n**— Pergaminho II de VI — O Título —**\nCom que nome os mortais conhecerão este decreto?'); }
-  if (etapa === 'titulo') { dados.titulo = texto; sessao.etapa = 'subtitulo'; return message.reply('⚡ *O título ecoa pelos salões do Olimpo.*\n\n**— Pergaminho III de VI — A Profecia —**\nUma frase sábia para acompanhar o decreto... *(ou `pular`)*'); }
+  if (etapa === 'versao') { dados.versao = texto.startsWith('v') ? texto : `v${texto}`; sessao.etapa = 'titulo'; return message.reply('⚡ *O selo foi gravado nos pergaminhos.*\n\n**— Pergaminho II de VII — O Título —**\nCom que nome os mortais conhecerão este decreto?'); }
+  if (etapa === 'titulo') { dados.titulo = texto; sessao.etapa = 'subtitulo'; return message.reply('⚡ *O título ecoa pelos salões do Olimpo.*\n\n**— Pergaminho III de VII — A Profecia —**\nUma frase sábia para acompanhar o decreto... *(ou `pular`)*'); }
   if (etapa === 'subtitulo') {
     dados.subtitulo = texto.toLowerCase() === 'pular' ? '' : texto;
     sessao.etapa = 'tags';
     const lista = Object.entries(TAGS).map(([n, t]) => `**${n}** — ${t.label}`).join('\n');
-    return message.reply('⚡ *As palavras foram inscritas.*\n\n**— Pergaminho IV de VI — Os Estandartes —**\nQuais símbolos divinos carregarão este decreto? *(ex: 1,3)*\n\n' + lista);
+    return message.reply('⚡ *As palavras foram inscritas.*\n\n**— Pergaminho IV de VII — Os Estandartes —**\nQuais símbolos divinos carregarão este decreto? *(ex: 1,3)*\n\n' + lista);
   }
   if (etapa === 'tags') {
     dados.tags = texto.split(',').map(s => s.trim()).filter(n => TAGS[n]).map(n => TAGS[n].key);
     if (!dados.tags.length) dados.tags = ['novo'];
     sessao.etapa = 'mudancas'; dados.mudancas = [];
-    return message.reply('⚡ *Os estandartes foram hasteados.*\n\n**— Pergaminho V de VI — As Obras dos Deuses —**\nRelate cada mudança, uma por mensagem.\nQuando terminar, proclame: `pronto`');
+    return message.reply('⚡ *Os estandartes foram hasteados.*\n\n**— Pergaminho V de VII — As Obras dos Deuses —**\nRelate cada mudança, uma por mensagem.\nQuando terminar, proclame: `pronto`');
   }
   if (etapa === 'mudancas') {
     if (texto.toLowerCase() === 'pronto') {
       if (!dados.mudancas.length) return message.reply('⚠️ *Os deuses exigem ao menos uma obra registrada, mortal.*');
-      sessao.etapa = 'proximo';
-      return message.reply(`⚡ *${dados.mudancas.length} obra(s) registrada(s) nos pergaminhos eternos.*\n\n**— Pergaminho VI de VI — O Horizonte —**\nHá visões do próximo decreto? *(ou \`pular\`)*`);
+      sessao.etapa = 'imagem';
+      return message.reply(`⚡ *${dados.mudancas.length} obra(s) registrada(s) nos pergaminhos eternos.*\n\n**— Pergaminho VI de VII — A Visão —**\n📸 Anexa uma **imagem** para ilustrar este decreto *(ou digita \`pular\`)*\n*A imagem aparecerá no site do changelog!*`);
     }
     dados.mudancas.push(texto);
     return message.react('✅').catch(() => {});
+  }
+  if (etapa === 'imagem') {
+    // Verifica se há imagem anexada
+    const anexo = message.attachments.first();
+    if (texto.toLowerCase() === 'pular' || !anexo) {
+      dados.imagem = null;
+    } else {
+      const url = anexo.url;
+      const ehImagem = /\.(png|jpg|jpeg|gif|webp)(\?|$)/i.test(url);
+      if (!ehImagem) {
+        return message.reply('⚠️ *Apenas imagens são aceitas (png, jpg, gif, webp). Tenta novamente ou digita `pular`.*');
+      }
+      dados.imagem = url;
+      await message.react('🖼️').catch(() => {});
+    }
+    sessao.etapa = 'proximo';
+    return message.reply(`⚡ *${dados.imagem ? 'Imagem registrada nos pergaminhos.' : 'Sem imagem — os deuses preferem o texto puro.'}*\n\n**— Pergaminho VII de VII — O Horizonte —**\nHá visões do próximo decreto? *(ou \`pular\`)*`);
   }
   if (etapa === 'proximo') {
     dados.proximo = texto.toLowerCase() === 'pular' ? null : texto;
@@ -670,7 +687,9 @@ async function processarEtapa(message) {
     return message.reply(
       `🔱 **O DECRETO ESTÁ PRONTO PARA SER PROCLAMADO**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
       `⚔️ **Versão:** ${dados.versao}\n📖 **Título:** ${dados.titulo}\n🌟 **Profecia:** ${dados.subtitulo || '*(silêncio dos deuses)*'}\n` +
-      `🏛️ **Estandartes:** ${tagLabels}\n📜 **Obras:** ${dados.mudancas.length} registrada(s)\n🔮 **Horizonte:** ${dados.proximo || '*(os oráculos silenciam)*'}\n` +
+      `🏛️ **Estandartes:** ${tagLabels}\n📜 **Obras:** ${dados.mudancas.length} registrada(s)\n` +
+      `🖼️ **Imagem:** ${dados.imagem ? '✅ Anexada' : '❌ Nenhuma'}\n` +
+      `🔮 **Horizonte:** ${dados.proximo || '*(os oráculos silenciam)*'}\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Proclame* **\`confirmar\`** *para gravar nos anais eternos, ou* **\`cancelar\`** *para retornar ao silêncio.*`
     );
   }
@@ -681,7 +700,7 @@ async function processarEtapa(message) {
       const dadosAtuais = await lerGist();
       const mes         = new Date().toLocaleString('pt-BR', { month: 'short', year: 'numeric' });
       dadosAtuais.updates = dadosAtuais.updates || [];
-      dadosAtuais.updates.unshift({ id: Date.now(), versao: dados.versao, titulo: dados.titulo, subtitulo: dados.subtitulo, tags: dados.tags, mudancas: dados.mudancas, data: mes });
+      dadosAtuais.updates.unshift({ id: Date.now(), versao: dados.versao, titulo: dados.titulo, subtitulo: dados.subtitulo, tags: dados.tags, mudancas: dados.mudancas, imagem: dados.imagem || null, data: mes });
       if (dados.proximo) dadosAtuais.proximaUpdate = dados.proximo;
       const ok = await salvarGist(dadosAtuais);
       if (!ok) throw new Error('Falha ao salvar update no Gist.');
@@ -706,19 +725,13 @@ async function processarEtapa(message) {
               .setFooter({ text: 'Tower Deep · Alpha' })
               .setTimestamp();
 
+            // Adiciona imagem ao embed se houver
+            if (dados.imagem) embedUpdate.setImage(dados.imagem);
+
             const botoesUpdate = new ActionRowBuilder().addComponents(
-              new ButtonBuilder()
-                .setLabel('🌐 Site Oficial')
-                .setURL('https://italozkv.github.io/tower-deep/')
-                .setStyle(ButtonStyle.Link),
-              new ButtonBuilder()
-                .setLabel('📜 Changelog Completo')
-                .setURL('https://italozkv.github.io/tower-deep/changelog.html')
-                .setStyle(ButtonStyle.Link),
-              new ButtonBuilder()
-                .setLabel('🗳️ Votar em Features')
-                .setURL('https://italozkv.github.io/tower-deep/votos.html')
-                .setStyle(ButtonStyle.Link),
+              new ButtonBuilder().setLabel('🌐 Site Oficial').setURL('https://italozkv.github.io/tower-deep/').setStyle(ButtonStyle.Link),
+              new ButtonBuilder().setLabel('📜 Changelog Completo').setURL('https://italozkv.github.io/tower-deep/changelog.html').setStyle(ButtonStyle.Link),
+              new ButtonBuilder().setLabel('🗳️ Votar em Features').setURL('https://italozkv.github.io/tower-deep/votos.html').setStyle(ButtonStyle.Link),
             );
 
             await canalAnuncio.send({ content: '@everyone', embeds: [embedUpdate], components: [botoesUpdate] });
@@ -1079,6 +1092,24 @@ const slashCommands = [
       .addStringOption(opt => opt.setName('status').setDescription('Novo status').setRequired(true)
         .addChoices({ name: '✓ Concluído', value: 'done' },{ name: '⚡ Em Desenvolvimento', value: 'active' },{ name: '◇ Planejado', value: 'planned' },{ name: '◇ Futuro', value: 'future' }))),
   new SlashCommandBuilder()
+    .setName('changelog').setDescription('📜 Gerenciar os changelogs do site')
+    .addSubcommand(sub => sub.setName('listar').setDescription('📋 Listar todos os changelogs publicados'))
+    .addSubcommand(sub => sub.setName('apagar').setDescription('🗑️ Apagar um changelog pelo número')
+      .addIntegerOption(opt => opt.setName('numero').setDescription('Número do changelog na lista (use /changelog listar para ver)').setRequired(true)))
+    .addSubcommand(sub => sub.setName('editar').setDescription('✏️ Editar título ou subtítulo de um changelog')
+      .addIntegerOption(opt => opt.setName('numero').setDescription('Número do changelog na lista').setRequired(true))
+      .addStringOption(opt => opt.setName('campo').setDescription('Campo a editar').setRequired(true)
+        .addChoices(
+          { name: '📖 Título',    value: 'titulo'    },
+          { name: '🌟 Subtítulo', value: 'subtitulo' },
+          { name: '🖼️ Imagem (URL)', value: 'imagem' },
+          { name: '🔮 Próxima update', value: 'proximo' },
+        ))
+      .addStringOption(opt => opt.setName('valor').setDescription('Novo valor para o campo').setRequired(true)))
+    .addSubcommand(sub => sub.setName('imagem').setDescription('🖼️ Adicionar/trocar imagem de um changelog')
+      .addIntegerOption(opt => opt.setName('numero').setDescription('Número do changelog na lista').setRequired(true))
+      .addAttachmentOption(opt => opt.setName('imagem').setDescription('Nova imagem para o changelog').setRequired(true))),
+  new SlashCommandBuilder()
     .setName('ticket').setDescription('🎫 Sistema de tickets de suporte')
     .addSubcommand(sub => sub.setName('painel').setDescription('📋 Enviar painel de abertura de tickets para este canal (staff)'))
     .addSubcommand(sub => sub.setName('fechar').setDescription('🔒 Fechar o ticket atual'))
@@ -1308,6 +1339,86 @@ client.on('interactionCreate', async (interaction) => {
           (topTexto || '*Nenhum mortal registrado ainda.*') + `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
         ephemeral: true,
       });
+      return;
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /changelog — gerenciar changelogs
+    // ──────────────────────────────────────────────────────────
+    if (interaction.isChatInputCommand() && interaction.commandName === 'changelog') {
+      // Apenas Dono e Admin (verifica cargos)
+      const member = interaction.member;
+      const temAcesso = (CONFIG.CARGO_DONO && member.roles.cache.has(CONFIG.CARGO_DONO)) ||
+                        (CONFIG.CARGO_ADMIN && member.roles.cache.has(CONFIG.CARGO_ADMIN));
+      if (!temAcesso) return interaction.reply({ content: '⚠️ *Apenas o Dono ou Admin do Olimpo pode editar os anais eternos.*', ephemeral: true });
+
+      const sub = interaction.options.getSubcommand();
+      await interaction.deferReply({ ephemeral: true });
+
+      try {
+        const dadosGist = await lerGist();
+        const updates   = dadosGist.updates || [];
+
+        // /changelog listar
+        if (sub === 'listar') {
+          if (!updates.length) return interaction.editReply({ content: '📜 *Nenhum decreto nos anais eternos ainda.*' });
+          const lista = updates.map((u, i) =>
+            `**#${i + 1}** — \`${u.versao}\` — **${u.titulo}** *(${u.data})* ${u.imagem ? '🖼️' : ''}`
+          ).join('\n');
+          return interaction.editReply({
+            content: `📜 **ANAIS DO OLIMPO — ${updates.length} decreto(s)**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${lista}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Use o número para editar ou apagar.*`,
+          });
+        }
+
+        // /changelog apagar
+        if (sub === 'apagar') {
+          const num = interaction.options.getInteger('numero');
+          if (num < 1 || num > updates.length) return interaction.editReply({ content: `⚠️ *Número inválido. Use entre 1 e ${updates.length}.*` });
+          const removido = updates.splice(num - 1, 1)[0];
+          dadosGist.updates = updates;
+          await salvarGist(dadosGist);
+          return interaction.editReply({ content: `🗑️ **Decreto apagado dos anais eternos:**\n\`${removido.versao}\` — ${removido.titulo}\n\n*O site será atualizado automaticamente.*` });
+        }
+
+        // /changelog editar
+        if (sub === 'editar') {
+          const num   = interaction.options.getInteger('numero');
+          const campo = interaction.options.getString('campo');
+          const valor = interaction.options.getString('valor');
+          if (num < 1 || num > updates.length) return interaction.editReply({ content: `⚠️ *Número inválido. Use entre 1 e ${updates.length}.*` });
+          const alvo = updates[num - 1];
+          const campoNomes = { titulo: '📖 Título', subtitulo: '🌟 Subtítulo', imagem: '🖼️ Imagem', proximo: '🔮 Próxima update' };
+          if (campo === 'proximo') {
+            dadosGist.proximaUpdate = valor;
+          } else {
+            alvo[campo] = valor;
+          }
+          dadosGist.updates = updates;
+          await salvarGist(dadosGist);
+          return interaction.editReply({
+            content: `✏️ **Decreto atualizado!**\n\`${alvo.versao}\` — ${alvo.titulo}\n\n${campoNomes[campo]}: ${valor}\n\n*O site será atualizado automaticamente.*`,
+          });
+        }
+
+        // /changelog imagem
+        if (sub === 'imagem') {
+          const num    = interaction.options.getInteger('numero');
+          const anexo  = interaction.options.getAttachment('imagem');
+          if (num < 1 || num > updates.length) return interaction.editReply({ content: `⚠️ *Número inválido. Use entre 1 e ${updates.length}.*` });
+          const ehImagem = /\.(png|jpg|jpeg|gif|webp)(\?|$)/i.test(anexo.url);
+          if (!ehImagem) return interaction.editReply({ content: '⚠️ *Apenas imagens são aceitas (png, jpg, gif, webp).*' });
+          updates[num - 1].imagem = anexo.url;
+          dadosGist.updates = updates;
+          await salvarGist(dadosGist);
+          return interaction.editReply({
+            content: `🖼️ **Imagem atualizada no decreto #${num}!**\n\`${updates[num-1].versao}\` — ${updates[num-1].titulo}\n\n*A imagem já aparece no site.*`,
+          });
+        }
+
+      } catch (err) {
+        console.error('Erro /changelog:', err.message);
+        return interaction.editReply({ content: `⚠️ *Os ventos do Érebo interferiram. Tente novamente.*` });
+      }
       return;
     }
 
@@ -1581,8 +1692,57 @@ client.on('messageCreate', async (message) => {
       try {
         const dados = await lerGist();
         if (!dados.updates?.length) return message.reply('📜 *Os pergaminhos estão em branco, mortal. Nenhum decreto foi proclamado ainda.*');
-        return responderTextoLongo(message, '📜 **ANAIS DO OLIMPO — Decretos Proclamados**\n━━━━━━━━━━━━━━━━━━━━━━━━━\n' + dados.updates.map(u => `⚔️ **${u.versao}** — ${u.titulo} *(${u.data})*`).join('\n'), true);
+        return responderTextoLongo(message, '📜 **ANAIS DO OLIMPO — Decretos Proclamados**\n━━━━━━━━━━━━━━━━━━━━━━━━━\n' + dados.updates.map((u, i) => `**#${i+1}** ⚔️ \`${u.versao}\` — ${u.titulo} *(${u.data})* ${u.imagem ? '🖼️' : ''}`).join('\n'), true);
       } catch { return message.reply('⚠️ *As brumas do Érebo ocultam os pergaminhos... Tente novamente.*'); }
+    }
+    // !apagar N — apaga o changelog de número N
+    if (texto.startsWith('!apagar')) {
+      const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+      const temAcesso = member && (
+        (CONFIG.CARGO_DONO  && member.roles.cache.has(CONFIG.CARGO_DONO)) ||
+        (CONFIG.CARGO_ADMIN && member.roles.cache.has(CONFIG.CARGO_ADMIN))
+      );
+      if (!temAcesso) return message.reply('🚫 *Apenas o Dono ou Admin pode apagar decretos.*');
+      const num = parseInt(texto.split(' ')[1]);
+      if (isNaN(num)) return message.reply('⚠️ *Uso: `!apagar 2` — informe o número do decreto (veja com `!listar`).*');
+      try {
+        const dados = await lerGist();
+        const updates = dados.updates || [];
+        if (num < 1 || num > updates.length) return message.reply(`⚠️ *Número inválido. Há ${updates.length} decreto(s).*`);
+        const removido = updates.splice(num - 1, 1)[0];
+        dados.updates = updates;
+        await salvarGist(dados);
+        return message.reply(`🗑️ **Decreto apagado:** \`${removido.versao}\` — ${removido.titulo}\n*O site foi atualizado.*`);
+      } catch { return message.reply('⚠️ *Erro ao apagar. Tente novamente.*'); }
+    }
+    // !editar N campo valor — edita um campo de changelog
+    if (texto.startsWith('!editar')) {
+      const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+      const temAcesso = member && (
+        (CONFIG.CARGO_DONO  && member.roles.cache.has(CONFIG.CARGO_DONO)) ||
+        (CONFIG.CARGO_ADMIN && member.roles.cache.has(CONFIG.CARGO_ADMIN))
+      );
+      if (!temAcesso) return message.reply('🚫 *Apenas o Dono ou Admin pode editar decretos.*');
+      const partes = texto.split(' ');
+      // !editar [num] [campo] [valor...]
+      const num   = parseInt(partes[1]);
+      const campo = partes[2]?.toLowerCase();
+      const valor = partes.slice(3).join(' ');
+      const camposValidos = ['titulo', 'subtitulo', 'imagem', 'proximo'];
+      if (isNaN(num) || !campo || !valor) {
+        return message.reply('⚠️ *Uso: `!editar 1 titulo Novo Título Aqui`*\n*Campos: `titulo`, `subtitulo`, `imagem` (URL), `proximo`*');
+      }
+      if (!camposValidos.includes(campo)) return message.reply(`⚠️ *Campo inválido. Use: ${camposValidos.join(', ')}*`);
+      try {
+        const dados = await lerGist();
+        const updates = dados.updates || [];
+        if (num < 1 || num > updates.length) return message.reply(`⚠️ *Número inválido. Há ${updates.length} decreto(s).*`);
+        if (campo === 'proximo') { dados.proximaUpdate = valor; }
+        else { updates[num - 1][campo] = valor; }
+        dados.updates = updates;
+        await salvarGist(dados);
+        return message.reply(`✏️ **Decreto #${num} atualizado!**\nCampo \`${campo}\` → ${valor}\n*O site foi atualizado.*`);
+      } catch { return message.reply('⚠️ *Erro ao editar. Tente novamente.*'); }
     }
     if (texto === '!ajuda') {
       return message.reply(
