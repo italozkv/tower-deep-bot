@@ -30,16 +30,29 @@ const CONFIG = {
   CANAL_ANUNCIO_ID: process.env.CANAL_ANUNCIO_ID,
   CANAL_BUGS_ID:    process.env.CANAL_BUGS_ID,
   GROK_KEY:         process.env.GROK_KEY,
-  // Cargos para sistema de token — adicione no Railway
-  CARGO_DONO:       process.env.CARGO_DONO,
-  CARGO_ADMIN:      process.env.CARGO_ADMIN,
-  CARGO_MOD:        process.env.CARGO_MOD,
-  CARGO_EQUIPE:     process.env.CARGO_EQUIPE,
-  // Sistema de tickets — adicione no Railway
-  CATEGORIA_TICKETS: process.env.CATEGORIA_TICKETS, // ID da categoria onde os tickets serão criados
-  CANAL_LOG_TICKETS: process.env.CANAL_LOG_TICKETS,  // Canal para log/transcrições de tickets
+  // Cargos
+  CARGO_DONO:        process.env.CARGO_DONO,
+  CARGO_ADMIN:       process.env.CARGO_ADMIN,
+  CARGO_MOD:         process.env.CARGO_MOD,
+  CARGO_EQUIPE:      process.env.CARGO_EQUIPE,
   // Cargo automático ao entrar no servidor
-  CARGO_MEMBRO: process.env.CARGO_MEMBRO || '1479896423679131688', // Gamerule (cargo padrão)
+  CARGO_MEMBRO:      process.env.CARGO_MEMBRO || '1479896423679131688', // Gamerule
+  // ⚡ Novas funcionalidades
+  CARGO_VERIFICADO:  process.env.CARGO_VERIFICADO,   // Cargo dado após /verificar
+  CANAL_CRIAR_TEMPLO: process.env.CANAL_CRIAR_TEMPLO, // ID do canal de voz "➕ Criar Templo"
+  CATEGORIA_TEMPLOS:  process.env.CATEGORIA_TEMPLOS,  // Categoria onde os templos são criados
+  // Sistema de tickets
+  CATEGORIA_TICKETS: process.env.CATEGORIA_TICKETS,
+  CANAL_LOG_TICKETS: process.env.CANAL_LOG_TICKETS,
+  // 🎨 Cores centralizadas
+  CORES: {
+    PRIMARIA: 0xc9a84c, // Dourado Olimpo
+    ERRO:     0xff5a5a, // Vermelho
+    SUCESSO:  0x3dd68c, // Verde
+    AVISO:    0xf0c060, // Amarelo
+    INFO:     0x4a9eff, // Azul
+    NEUTRO:   0x555555, // Cinza
+  },
 };
 
 const missingVars = [];
@@ -59,6 +72,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildVoiceStates, // necessário para o sistema de Templos
   ]
 });
 
@@ -143,17 +157,28 @@ const TAGS = {
 const xpData = new Map();
 
 const NIVEIS_XP = [
-  { nivel: 1,  nome: 'Mortal Comum',            xpMin: 0    },
-  { nivel: 2,  nome: 'Mensageiro de Hermes',     xpMin: 50   },
-  { nivel: 3,  nome: 'Guardião de Atena',        xpMin: 150  },
-  { nivel: 4,  nome: 'Guerreiro de Ares',        xpMin: 300  },
-  { nivel: 5,  nome: 'Navegante de Poseidon',    xpMin: 500  },
-  { nivel: 6,  nome: 'Arauto de Zeus',           xpMin: 750  },
-  { nivel: 7,  nome: 'Campeão de Apolo',         xpMin: 1050 },
-  { nivel: 8,  nome: 'Semideus do Olimpo',       xpMin: 1400 },
-  { nivel: 9,  nome: 'Herói Imortal',            xpMin: 1800 },
-  { nivel: 10, nome: 'Divindade do Olimpo',      xpMin: 2300 },
+  { nivel: 1,  nome: 'Mortal Comum',            xpMin: 0,    imagem: null },
+  { nivel: 2,  nome: 'Mensageiro de Hermes',     xpMin: 50,   imagem: null },
+  { nivel: 3,  nome: 'Guardião de Atena',        xpMin: 150,  imagem: null },
+  { nivel: 4,  nome: 'Guerreiro de Ares',        xpMin: 300,  imagem: null },
+  { nivel: 5,  nome: 'Navegante de Poseidon',    xpMin: 500,  imagem: null },
+  { nivel: 6,  nome: 'Arauto de Zeus',           xpMin: 750,  imagem: null },
+  { nivel: 7,  nome: 'Campeão de Apolo',         xpMin: 1050, imagem: null },
+  { nivel: 8,  nome: 'Semideus do Olimpo',       xpMin: 1400, imagem: null },
+  { nivel: 9,  nome: 'Herói Imortal',            xpMin: 1800, imagem: null },
+  { nivel: 10, nome: 'Divindade do Olimpo',      xpMin: 2300, imagem: null }, // Troque null por URLs de imagens/GIFs
 ];
+// 💡 Para adicionar imagens, substitua null pelo link direto:
+// imagem: 'https://i.imgur.com/SEU_GIF.gif'
+
+// 📊 Barra de progresso visual
+function gerarBarraProgresso(atual, max, tamanho = 12) {
+  if (max <= 0) max = 1;
+  const pct = Math.min(atual / max, 1);
+  const cheio = Math.round(tamanho * pct);
+  const vazio = tamanho - cheio;
+  return '█'.repeat(cheio) + '░'.repeat(vazio) + ` ${Math.round(pct * 100)}%`;
+}
 
 function getNivel(xp)       { let a = NIVEIS_XP[0]; for (const n of NIVEIS_XP) { if (xp >= n.xpMin) a = n; } return a; }
 function getProximoNivel(xp){ for (const n of NIVEIS_XP) { if (xp < n.xpMin) return n; } return null; }
@@ -1136,6 +1161,10 @@ const slashCommands = [
     .addSubcommand(sub => sub.setName('remove').setDescription('➖ Remover usuário do ticket')
       .addUserOption(opt => opt.setName('usuario').setDescription('Usuário a remover').setRequired(true)))
     .addSubcommand(sub => sub.setName('listar').setDescription('📜 Listar todos os tickets abertos (staff)')),
+  new SlashCommandBuilder()
+    .setName('verificar')
+    .setDescription('✅ Vincule sua conta do Roblox ao Discord')
+    .addStringOption(opt => opt.setName('usuario').setDescription('Seu nome de usuário no Roblox').setRequired(true)),
 ].map(cmd => cmd.toJSON());
 
 async function registrarSlashCommands(clientId) {
@@ -1338,6 +1367,12 @@ client.on('interactionCreate', async (interaction) => {
       const nivel   = getNivel(dados.xp);
       const proximo = getProximoNivel(dados.xp);
       const faltam  = proximo ? proximo.xpMin - dados.xp : 0;
+
+      // Barra de progresso
+      const xpAtualNivel  = dados.xp - nivel.xpMin;
+      const xpNecessario  = proximo ? proximo.xpMin - nivel.xpMin : 1;
+      const barra = proximo ? gerarBarraProgresso(xpAtualNivel, xpNecessario, 12) : '████████████ 100%';
+
       const medalhas = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
       const top5     = [...xpData.entries()].sort((a, b) => b[1].xp - a[1].xp).slice(0, 5);
       let topTexto   = '';
@@ -1350,6 +1385,7 @@ client.on('interactionCreate', async (interaction) => {
         content:
           `✨ **PERGAMINHO DE ${interaction.user.username.toUpperCase()}**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
           `🏛️ **Título:** ${nivel.nome}\n⚡ **XP Total:** ${dados.xp}\n📊 **Nível:** ${nivel.nivel}/10\n` +
+          `📈 **Progresso:** \`[${barra}]\`\n` +
           (proximo ? `🔮 **Próximo:** ${proximo.nome} *(faltam ${faltam} XP)*` : '🌟 *Atingiste a divindade máxima, imortal!*') +
           `\n\n🏆 **OLIMPO — Top Mortais**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
           (topTexto || '*Nenhum mortal registrado ainda.*') + `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
@@ -1435,6 +1471,62 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.editReply({ content: `⚠️ *Os ventos do Érebo interferiram. Tente novamente.*` });
       }
       return;
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // /verificar — vincular conta do Roblox
+    // ──────────────────────────────────────────────────────────
+    if (interaction.isChatInputCommand() && interaction.commandName === 'verificar') {
+      const robloxUser = interaction.options.getString('usuario');
+      await interaction.deferReply({ ephemeral: true });
+      try {
+        const res  = await fetch(`https://users.roblox.com/v1/users/search?keyword=${encodeURIComponent(robloxUser)}&limit=10`);
+        const data = await res.json();
+        if (data.data && data.data.length > 0) {
+          const rbUser = data.data[0];
+          // Dá o cargo de verificado se configurado
+          if (CONFIG.CARGO_VERIFICADO) {
+            const cargo = interaction.guild.roles.cache.get(CONFIG.CARGO_VERIFICADO);
+            if (cargo) await interaction.member.roles.add(cargo);
+          }
+          const embed = new EmbedBuilder()
+            .setColor(CONFIG.CORES.SUCESSO)
+            .setTitle('✅ Conta Vinculada com Sucesso!')
+            .setDescription(`Tua alma no Discord foi atrelada ao mortal **${rbUser.name}** no Roblox.\nVocê recebeu as bênçãos de verificado.`)
+            .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${rbUser.id}&width=420&height=420&format=png`);
+          return interaction.editReply({ embeds: [embed] });
+        } else {
+          return interaction.editReply({ content: '⚠️ *Os oráculos não encontraram esse mortal no Roblox. Verifique o nome e tente novamente.*' });
+        }
+      } catch (err) {
+        console.error('Erro /verificar:', err.message);
+        return interaction.editReply({ content: '⚠️ *Houve uma perturbação no portal para o Roblox. Tente novamente mais tarde.*' });
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Menu suspenso de ajuda
+    // ──────────────────────────────────────────────────────────
+    if (interaction.isStringSelectMenu() && interaction.customId === 'menu_ajuda') {
+      const escolha = interaction.values[0];
+      const embed   = new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA);
+
+      if (escolha === 'mortais') {
+        embed.setTitle('👥 Poderes dos Mortais')
+          .setDescription('🐛 `/bug` — Relatar uma anomalia\n💡 `/sugestao` — Enviar visão ao Olimpo\n🏆 `/rank` — Ver teu título divino\n✅ `/verificar` — Vincular conta do Roblox\n🎫 Menu de tickets — Abrir chamado de suporte');
+      } else if (escolha === 'oraculo') {
+        embed.setTitle('✨ O Oráculo')
+          .setDescription('Mencione o bot em qualquer canal:\n`@Bot qual torre é melhor?` — Consulta geral\n`@Bot tenho um bug` — Auxílio técnico\n`@Bot sugestão: torre X` — Análise de ideia');
+      } else if (escolha === 'equipe') {
+        if (!ehEquipe(interaction.member)) return interaction.reply({ content: '🚫 *Os deuses proíbem teu acesso a esta sabedoria.*', ephemeral: true });
+        embed.setTitle('🛡️ Armamento da Equipe & Mods')
+          .setDescription('🔑 `!token` — Gerar token do site\n📜 `!update` — Ritual de novo decreto\n📋 `!listar` — Consultar os anais\n🗳️ `/enquete` — Criar enquete no site\n🧹 `/limpar` — Apagar mensagens\n📢 `/anunciar` — Fazer anúncio\n🎫 Comandos `/ticket`...');
+      } else if (escolha === 'admin') {
+        if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫 *Os deuses proíbem teu acesso a esta sabedoria.*', ephemeral: true });
+        embed.setTitle('🔱 Grimório dos Admins')
+          .setDescription('✏️ `!editar / !apagar` — Gerenciar decretos\n📜 `/changelog` — Gerenciar decretos via slash\n🗺️ `/roadmap` — Gerenciar roadmap do site\n🚫 `!revogar` — Gerenciar tokens ativos');
+      }
+      return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
     // ──────────────────────────────────────────────────────────
@@ -1844,6 +1936,27 @@ client.on('messageCreate', async (message) => {
 
       return message.reply(msg);
     }
+
+    if (texto === '!ajuda') {
+      const embedAjuda = new EmbedBuilder()
+        .setColor(CONFIG.CORES.PRIMARIA)
+        .setTitle('🔱 GRIMÓRIO DO OLIMPO')
+        .setDescription('*Selecione a seção do grimório que desejas consultar no menu abaixo.*')
+        .setFooter({ text: 'Tower Deep · Sabedoria Divina' });
+
+      const menuAjuda = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('menu_ajuda')
+          .setPlaceholder('📖 Escolha a página do Grimório...')
+          .addOptions(
+            { label: 'Poderes dos Mortais',    description: 'Comandos acessíveis a todos os jogadores',    value: 'mortais', emoji: '👥' },
+            { label: 'O Oráculo (IA)',          description: 'Como conversar com a Inteligência Divina',   value: 'oraculo', emoji: '✨' },
+            { label: 'Armamento da Equipe',     description: 'Comandos para Equipe e Moderadores',         value: 'equipe',  emoji: '🛡️' },
+            { label: 'Grimório dos Admins',     description: 'Poderes de alto escalão e configuração',     value: 'admin',   emoji: '🔱' },
+          )
+      );
+      return message.reply({ embeds: [embedAjuda], components: [menuAjuda] });
+    }
   }
 
   // Sessão em andamento
@@ -1871,17 +1984,63 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // XP
+  // XP e Level Up
   if (message.guild && !ehComando) {
-    // Store username for ranking
     if (xpData.has(message.author.id)) {
       xpData.get(message.author.id).username = message.author.username;
     }
     const resultado = ganharXP(message.author.id);
     if (resultado?.subiu) {
-      await message.channel.send(
-        `⚡ **ASCENSÃO DIVINA!** ⚡\n${message.author} subiu para o título de **${resultado.nivel.nome}** (Nível ${resultado.nivel.nivel})!\n*Os deuses do Olimpo reconhecem tua dedicação, mortal.* 🔱`
-      );
+      const embedUp = new EmbedBuilder()
+        .setColor(CONFIG.CORES.AVISO)
+        .setTitle('⚡ ASCENSÃO DIVINA! ⚡')
+        .setDescription(`${message.author} ascendeu para o título de **${resultado.nivel.nome}** (Nível ${resultado.nivel.nivel})!\n\n*Os deuses do Olimpo reconhecem tua dedicação, mortal.* 🔱`)
+        .setThumbnail(message.author.displayAvatarURL({ dynamic: true }))
+        .setTimestamp();
+
+      if (resultado.nivel.imagem) embedUp.setImage(resultado.nivel.imagem);
+
+      await message.channel.send({ content: `${message.author}`, embeds: [embedUp] });
+    }
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// CANAIS DE VOZ TEMPORÁRIOS (TEMPLOS)
+// ─────────────────────────────────────────────────────────────
+client.on('voiceStateUpdate', async (oldState, newState) => {
+  // Quando alguém entra no canal "Criar Templo"
+  if (newState.channelId === CONFIG.CANAL_CRIAR_TEMPLO) {
+    const member = newState.member;
+    try {
+      const guild     = newState.guild;
+      const novoCanal = await guild.channels.create({
+        name:   `🏛️ Templo de ${member.user.username}`,
+        type:   ChannelType.GuildVoice,
+        parent: CONFIG.CATEGORIA_TEMPLOS || newState.channel.parentId,
+        permissionOverwrites: [
+          { id: guild.id,   allow: [PermissionFlagsBits.ViewChannel] },
+          { id: member.id,  allow: [PermissionFlagsBits.ManageChannels, PermissionFlagsBits.MuteMembers, PermissionFlagsBits.DeafenMembers, PermissionFlagsBits.MoveMembers] },
+        ],
+      });
+      await member.voice.setChannel(novoCanal);
+      console.log(`🏛️ Templo criado para ${member.user.tag}: ${novoCanal.name}`);
+    } catch (err) { console.error('Erro ao criar templo:', err.message); }
+  }
+
+  // Quando alguém sai — apaga templo vazio
+  if (oldState.channelId && oldState.channelId !== CONFIG.CANAL_CRIAR_TEMPLO) {
+    const canal = oldState.channel;
+    if (
+      canal &&
+      canal.name.startsWith('🏛️ Templo de') &&
+      canal.members.size === 0 &&
+      (canal.parentId === CONFIG.CATEGORIA_TEMPLOS || !CONFIG.CATEGORIA_TEMPLOS)
+    ) {
+      try {
+        await canal.delete('Olimpo apagou o templo vazio');
+        console.log(`🗑️ Templo vazio removido: ${canal.name}`);
+      } catch (err) { console.error('Erro ao apagar templo:', err.message); }
     }
   }
 });
