@@ -5,7 +5,7 @@ const {
   Routes,
   SlashCommandBuilder,
   ModalBuilder,
-  TextInputBuilder,
+  TextInputBuilder,J
   TextInputStyle,
   ActionRowBuilder,
   PermissionFlagsBits,
@@ -1590,7 +1590,7 @@ const slashCommands = [
   // 🎁 Sistema de códigos
   new SlashCommandBuilder()
     .setName('gencodigo')
-    .setDescription('🎁 Gerar um código de resgate com recompensas (Admin)')
+    .setDescription('Gerar um código de resgate com recompensas (Admin)')
     .addStringOption(opt => opt.setName('descricao').setDescription('Descrição do código (ex: Evento de Natal)').setRequired(true))
     .addIntegerOption(opt => opt.setName('maxusos').setDescription('Quantas contas podem usar (padrão: ilimitado)').setRequired(false))
     .addIntegerOption(opt => opt.setName('expira_horas').setDescription('Expira em X horas (padrão: nunca)').setRequired(false)),
