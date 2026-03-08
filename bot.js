@@ -5,7 +5,7 @@ const {
   Routes,
   SlashCommandBuilder,
   ModalBuilder,
-  TextInputBuilder,J
+  TextInputBuilder,
   TextInputStyle,
   ActionRowBuilder,
   PermissionFlagsBits,
@@ -17,7 +17,7 @@ const {
   StringSelectMenuOptionBuilder,
 } = require('discord.js');
 const https = require('https');
-const http  = require('http');  // ← servidor de tokens
+const http  = require('http');
 const fs = require('fs');
 const path = require('path');
 
@@ -32,31 +32,25 @@ const CONFIG = {
   CANAL_ANUNCIO_ID: process.env.CANAL_ANUNCIO_ID,
   CANAL_BUGS_ID:    process.env.CANAL_BUGS_ID,
   GROK_KEY:         process.env.GROK_KEY,
-  // Cargos
   CARGO_DONO:        process.env.CARGO_DONO,
   CARGO_ADMIN:       process.env.CARGO_ADMIN,
   CARGO_MOD:         process.env.CARGO_MOD,
   CARGO_EQUIPE:      process.env.CARGO_EQUIPE,
-  // Cargo automático ao entrar no servidor
-  CARGO_MEMBRO:      process.env.CARGO_MEMBRO || '1479896423679131688', // Gamerule
-  // ⚡ Novas funcionalidades
-  CARGO_VERIFICADO:  process.env.CARGO_VERIFICADO,   // Cargo dado após /verificar
-  CANAL_CRIAR_TEMPLO: process.env.CANAL_CRIAR_TEMPLO, // ID do canal de voz "➕ Criar Templo"
-  CATEGORIA_TEMPLOS:  process.env.CATEGORIA_TEMPLOS,  // Categoria onde os templos são criados
-  // Sistema de tickets
+  CARGO_MEMBRO:      process.env.CARGO_MEMBRO || '1479896423679131688',
+  CARGO_VERIFICADO:  process.env.CARGO_VERIFICADO,
+  CANAL_CRIAR_TEMPLO: process.env.CANAL_CRIAR_TEMPLO,
+  CATEGORIA_TEMPLOS:  process.env.CATEGORIA_TEMPLOS,
   CATEGORIA_TICKETS: process.env.CATEGORIA_TICKETS,
   CANAL_LOG_TICKETS: process.env.CANAL_LOG_TICKETS,
-  // 🎁 Sistema de códigos de resgate
   ROBLOX_API_SECRET: process.env.ROBLOX_API_SECRET || 'tower-deep-secret-2024',
   CANAL_CODIGOS:     process.env.CANAL_CODIGOS,
-  // 🎨 Cores centralizadas
   CORES: {
-    PRIMARIA: 0xc9a84c, // Dourado Olimpo
-    ERRO:     0xff5a5a, // Vermelho
-    SUCESSO:  0x3dd68c, // Verde
-    AVISO:    0xf0c060, // Amarelo
-    INFO:     0x4a9eff, // Azul
-    NEUTRO:   0x555555, // Cinza
+    PRIMARIA: 0xc9a84c,
+    ERRO:     0xff5a5a,
+    SUCESSO:  0x3dd68c,
+    AVISO:    0xf0c060,
+    INFO:     0x4a9eff,
+    NEUTRO:   0x555555,
   },
 };
 
@@ -77,7 +71,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildVoiceStates, // necessário para o sistema de Templos
+    GatewayIntentBits.GuildVoiceStates,
   ]
 });
 
@@ -171,12 +165,9 @@ const NIVEIS_XP = [
   { nivel: 7,  nome: 'Campeão de Apolo',         xpMin: 1050, imagem: null },
   { nivel: 8,  nome: 'Semideus do Olimpo',       xpMin: 1400, imagem: null },
   { nivel: 9,  nome: 'Herói Imortal',            xpMin: 1800, imagem: null },
-  { nivel: 10, nome: 'Divindade do Olimpo',      xpMin: 2300, imagem: null }, // Troque null por URLs de imagens/GIFs
+  { nivel: 10, nome: 'Divindade do Olimpo',      xpMin: 2300, imagem: null },
 ];
-// 💡 Para adicionar imagens, substitua null pelo link direto:
-// imagem: 'https://i.imgur.com/SEU_GIF.gif'
 
-// 📊 Barra de progresso visual
 function gerarBarraProgresso(atual, max, tamanho = 12) {
   if (max <= 0) max = 1;
   const pct = Math.min(atual / max, 1);
@@ -323,69 +314,56 @@ function gerarCodigo() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// CATÁLOGO DE ITENS DO JOGO (extraído de ItemConfig + SemideusItemConfig)
-// Usado pelo /gencodigo para mostrar lista de itens reais
-// Admin pode adicionar mais com /itemcadastrar
+// TIPOS DE RECOMPENSA
+// CORREÇÃO: emojis removidos do campo "emoji" para evitar
+// erro "emoji must be a valid emoji" no discord.js v14.
+// Agora o emoji aparece apenas no label, que é texto livre.
 // ─────────────────────────────────────────────────────────────
 const TIPOS_RECOMPENSA = {
-  moedas:         { emoji: '🪙', label: 'GodCoins',      unidade: 'Moedas',  temLista: false },
-  gemas:          { emoji: '💎', label: 'Gems',          unidade: 'Gemas',   temLista: false },
-  presents:       { emoji: '🎁', label: 'Presents',      unidade: 'Presents',temLista: false },
-  favor_greek:    { emoji: '🏛️', label: 'Favor Grego',   unidade: 'Favor',   temLista: false },
-  favor_norse:    { emoji: '🛡️', label: 'Favor Nórdico', unidade: 'Favor',   temLista: false },
-  favor_egyptian: { emoji: '𓂀', label: 'Favor Egípcio', unidade: 'Favor',   temLista: false },
-  xp:             { emoji: '⚡', label: 'XP Bônus',      unidade: 'XP',      temLista: false },
-  item:           { emoji: '🎁', label: 'Item do Jogo',  unidade: '',        temLista: true  },
+  moedas:         { label: '🪙 GodCoins',       unidade: 'Moedas',   temLista: false },
+  gemas:          { label: '💎 Gems',            unidade: 'Gemas',    temLista: false },
+  presents:       { label: '🎁 Presents',        unidade: 'Presents', temLista: false },
+  favor_greek:    { label: '🏛️ Favor Grego',     unidade: 'Favor',    temLista: false },
+  favor_norse:    { label: '🛡️ Favor Nórdico',   unidade: 'Favor',    temLista: false },
+  favor_egyptian: { label: '✨ Favor Egípcio',   unidade: 'Favor',    temLista: false },
+  xp:             { label: '⚡ XP Bônus',        unidade: 'XP',       temLista: false },
+  item:           { label: '🎀 Item do Jogo',    unidade: '',         temLista: true  },
 };
 
 function normalizarCategoriaItem(categoriaRaw) {
   const categoria = String(categoriaRaw || '').trim();
   if (!categoria) return 'Outros';
-
-  // Base (ItemConfig)
   const baseCats = new Set(['Material', 'Crystal', 'Essence', 'Core', 'Shard', 'Consumable', 'Currency', 'Special']);
   if (baseCats.has(categoria)) return `Base > ${categoria}`;
-
-  // Semideus (SemideusItemConfig)
   if (categoria.startsWith('Essência')) return 'Semideus > Essências Divinas';
   if (categoria === 'DNA' || categoria.startsWith('DNA')) return 'Semideus > DNA de Criaturas';
   if (categoria === 'Cristal Alma' || categoria.startsWith('Cristal')) return 'Semideus > Cristais de Alma';
   if (categoria === 'Catalisador' || categoria.startsWith('Catalisador')) return 'Semideus > Catalisadores';
   if (categoria === 'Auxiliar' || categoria.startsWith('Auxiliar')) return 'Semideus > Itens Auxiliares';
-
   return categoria;
 }
 
-// Catálogo fixo extraído dos ItemConfig e SemideusItemConfig do jogo
-// Categorias: Material, Crystal, Essence, Core, Shard, Special, Currency,
-//             Essência, DNA, Cristal, Catalisador, Auxiliar
 const CATALOGO_FIXO = [
-  // ── MATERIAIS BÁSICOS (ItemConfig) ──
   { id:'gold_coin',          nome:'Moeda de Ouro',              raridade:'Common',    categoria:'Material'    },
   { id:'tower_shard',        nome:'Fragmento de Torre',         raridade:'Uncommon',  categoria:'Shard'       },
   { id:'food_crate',         nome:'Caixa de Comida',            raridade:'Common',    categoria:'Material'    },
   { id:'bone_fragment',      nome:'Fragmento de Osso',          raridade:'Common',    categoria:'Material'    },
   { id:'iron_ingot',         nome:'Lingote de Ferro',           raridade:'Uncommon',  categoria:'Material'    },
   { id:'farm_seed',          nome:'Semente Sagrada',            raridade:'Uncommon',  categoria:'Material'    },
-  // ── CRISTAIS (ItemConfig) ──
   { id:'snow_crystal',       nome:'Cristal de Gelo',            raridade:'Rare',      categoria:'Crystal'     },
   { id:'thunder_stone',      nome:'Pedra do Trovão',            raridade:'Rare',      categoria:'Crystal'     },
   { id:'death_crystal',      nome:'Cristal da Morte',           raridade:'Rare',      categoria:'Crystal'     },
   { id:'rune_crystal',       nome:'Cristal de Runa',            raridade:'Rare',      categoria:'Crystal'     },
   { id:'sky_essence',        nome:'Essência do Céu',            raridade:'Rare',      categoria:'Crystal'     },
-  // ── ESSÊNCIAS (ItemConfig) ──
   { id:'shadow_essence',     nome:'Essência Sombria',           raridade:'Epic',      categoria:'Essence'     },
   { id:'void_fragment',      nome:'Fragmento do Vazio',         raridade:'Epic',      categoria:'Essence'     },
-  // ── NÚCLEOS (ItemConfig) ──
   { id:'rare_core',          nome:'Núcleo Raro',                raridade:'Rare',      categoria:'Core'        },
   { id:'legendary_core',     nome:'Núcleo Lendário',            raridade:'Legendary', categoria:'Core'        },
   { id:'mythic_shard',       nome:'Fragmento Mítico',           raridade:'Mythic',    categoria:'Shard'       },
-  // ── ESPECIAIS (ItemConfig) ──
   { id:'void_bag',           nome:'Saco do Vazio',              raridade:'Epic',      categoria:'Special'     },
   { id:'training_manual',    nome:'Manual dos Deuses',          raridade:'Uncommon',  categoria:'Consumable'  },
   { id:'premium_token',      nome:'Token Divino',               raridade:'Epic',      categoria:'Currency'    },
   { id:'portal_mistico',     nome:'Portal Místico',             raridade:'Legendary', categoria:'Special'     },
-  // ── ESSÊNCIAS DIVINAS (SemideusItemConfig) ──
   { id:'essencia_zeus',      nome:'Essência de Zeus',           raridade:'Raro',      categoria:'Essência Grego'   },
   { id:'essencia_poseidon',  nome:'Essência de Poseidon',       raridade:'Raro',      categoria:'Essência Grego'   },
   { id:'essencia_ares',      nome:'Essência de Ares',           raridade:'Incomum',   categoria:'Essência Grego'   },
@@ -410,7 +388,6 @@ const CATALOGO_FIXO = [
   { id:'essencia_nyx',       nome:'Essência de Nyx',            raridade:'Primordial',categoria:'Essência Secreta' },
   { id:'essencia_erebo',     nome:'Essência do Érebo',          raridade:'Lendario',  categoria:'Essência Secreta' },
   { id:'essencia_tartaro',   nome:'Essência do Tártaro',        raridade:'Lendario',  categoria:'Essência Secreta' },
-  // ── DNA DE CRIATURAS (SemideusItemConfig) ──
   { id:'dna_goblin',         nome:'DNA de Goblin',              raridade:'Comum',     categoria:'DNA'         },
   { id:'dna_esqueleto',      nome:'DNA de Esqueleto',           raridade:'Comum',     categoria:'DNA'         },
   { id:'dna_lobo',           nome:'DNA de Lobo',                raridade:'Comum',     categoria:'DNA'         },
@@ -435,7 +412,6 @@ const CATALOGO_FIXO = [
   { id:'dna_leviata',        nome:'DNA de Leviatã',             raridade:'Lendario',  categoria:'DNA Boss'    },
   { id:'dna_caos_encarnado', nome:'DNA de Caos Encarnado',      raridade:'Primordial',categoria:'DNA Final'   },
   { id:'dna_nyx_sombria',    nome:'DNA de Nyx Sombria',         raridade:'Primordial',categoria:'DNA Final'   },
-  // ── CRISTAIS DE ALMA (SemideusItemConfig) ──
   { id:'cristal_guerreiro',  nome:'Cristal Guerreiro',          raridade:'Comum',     categoria:'Cristal Alma'},
   { id:'cristal_protetor',   nome:'Cristal Protetor',           raridade:'Comum',     categoria:'Cristal Alma'},
   { id:'cristal_cacador',    nome:'Cristal Caçador',            raridade:'Incomum',   categoria:'Cristal Alma'},
@@ -448,7 +424,6 @@ const CATALOGO_FIXO = [
   { id:'cristal_berserker',  nome:'Cristal Berserker',          raridade:'Epico',     categoria:'Cristal Alma'},
   { id:'cristal_divino',     nome:'Cristal Divino',             raridade:'Lendario',  categoria:'Cristal Alma'},
   { id:'cristal_vazio',      nome:'Cristal do Vazio',           raridade:'Primordial',categoria:'Cristal Alma'},
-  // ── CATALISADORES (SemideusItemConfig) ──
   { id:'cat_chama_primordial',nome:'Chama Primordial',          raridade:'Incomum',   categoria:'Catalisador' },
   { id:'cat_gelo_eterno',    nome:'Gelo Eterno',                raridade:'Incomum',   categoria:'Catalisador' },
   { id:'cat_raio_puro',      nome:'Raio Puro',                  raridade:'Raro',      categoria:'Catalisador' },
@@ -465,7 +440,6 @@ const CATALOGO_FIXO = [
   { id:'cat_runa_yggdrasil', nome:'Runa de Yggdrasil',          raridade:'Epico',     categoria:'Catalisador' },
   { id:'cat_olho_horus',     nome:'Olho de Hórus',              raridade:'Lendario',  categoria:'Catalisador' },
   { id:'cat_chave_tartaro',  nome:'Chave do Tártaro',           raridade:'Primordial',categoria:'Catalisador' },
-  // ── ITENS AUXILIARES (SemideusItemConfig) ──
   { id:'aux_purificador_divino',nome:'Purificador Divino',      raridade:'Raro',      categoria:'Auxiliar'    },
   { id:'aux_amplificador_dna',  nome:'Amplificador de DNA',     raridade:'Raro',      categoria:'Auxiliar'    },
   { id:'aux_estabilizador_alma',nome:'Estabilizador de Alma',   raridade:'Raro',      categoria:'Auxiliar'    },
@@ -499,10 +473,7 @@ function parseCatalogoItemConfigLua(luaText) {
   const itemRe = /\{[\s\S]*?\bId\s*=\s*"([^"]+)"[\s\S]*?\bName\s*=\s*"([^"]+)"[\s\S]*?\bRarity\s*=\s*"([^"]+)"[\s\S]*?\bCategory\s*=\s*"([^"]+)"[\s\S]*?\}/g;
   let m;
   while ((m = itemRe.exec(block))) {
-    const id = m[1];
-    const nome = m[2];
-    const raridade = m[3];
-    const categoria = m[4];
+    const id = m[1]; const nome = m[2]; const raridade = m[3]; const categoria = m[4];
     if (!id) continue;
     out.push({ id, nome, raridade, categoria });
   }
@@ -518,19 +489,15 @@ function parseCatalogoSemideusLua(luaText) {
     { key: 'Catalisadores', categoria: 'Catalisador' },
     { key: 'ItensAuxiliares', categoria: 'Auxiliar' },
   ];
-
   for (const g of grupos) {
     const listRe = new RegExp(`SemideusItemConfig\\.${g.key}\\s*=\\s*\\{([\\s\\S]*?)\\n\\}`, 'm');
     const listMatch = luaText.match(listRe);
     const block = listMatch?.[1] || '';
     if (!block) continue;
-
     const itemRe = /\{[\s\S]*?\bId\s*=\s*"([^"]+)"[\s\S]*?\bNome\s*=\s*"([^"]+)"[\s\S]*?\bRaridade\s*=\s*"([^"]+)"[\s\S]*?\}/g;
     let m;
     while ((m = itemRe.exec(block))) {
-      const id = m[1];
-      const nome = m[2];
-      const raridade = m[3];
+      const id = m[1]; const nome = m[2]; const raridade = m[3];
       if (!id) continue;
       out.push({ id, nome, raridade, categoria: g.categoria });
     }
@@ -540,10 +507,7 @@ function parseCatalogoSemideusLua(luaText) {
 
 async function getCatalogoAuto() {
   const now = Date.now();
-  if (catalogoAutoCache && (now - catalogoAutoCacheAt) < (5 * 60 * 1000)) {
-    return catalogoAutoCache;
-  }
-
+  if (catalogoAutoCache && (now - catalogoAutoCacheAt) < (5 * 60 * 1000)) return catalogoAutoCache;
   try {
     const { itemConfig, semideusConfig } = getPathsCatalogoLua();
     const [itemLua, semiLua] = await Promise.all([
@@ -564,7 +528,6 @@ async function getCatalogoAuto() {
   }
 }
 
-// Helper — retorna lista de itens do catálogo (fixos + cadastrados) filtrados por categoria
 async function getCatalogoCompleto() {
   const db = await lerCodigos();
   const extras = db.itensExtras || [];
@@ -574,24 +537,21 @@ async function getCatalogoCompleto() {
   for (const it of merged) {
     if (!it?.id) continue;
     const normalized = { ...it, categoria: normalizarCategoriaItem(it.categoria) };
-
     dedup.set(it.id, normalized);
   }
   return [...dedup.values()];
 }
 
-// Helper — formata item para exibição no Discord
 function formatarItem(item, qtd = 1) {
   const emoji = RARIDADE_EMOJI[item.raridade] || '🎁';
   const qtdStr = qtd > 1 ? ` x${qtd}` : '';
   return `${emoji} **${item.nome}**${qtdStr} *(${item.raridade} — ${item.categoria})*`;
 }
 
-// Sessões de criação de código por admin
 const sessoescodigo = new Map();
 
 // ─────────────────────────────────────────────────────────────
-// HELPERS DE PERMISSÃO POR CARGO
+// HELPERS DE PERMISSÃO
 // ─────────────────────────────────────────────────────────────
 function temCargo(member, ...cargos) {
   return cargos.some(id => id && member?.roles?.cache?.has(id));
@@ -605,7 +565,6 @@ async function getMember(message) {
   if (!message.guild) return null;
   return message.guild.members.fetch(message.author.id).catch(() => null);
 }
-
 
 function temPermissaoModeracao(interaction) {
   return interaction.member?.permissions?.has(PermissionFlagsBits.ManageMessages);
@@ -627,11 +586,8 @@ async function responderTextoLongo(messageOrInteraction, texto, isReply = true) 
 }
 
 // ─────────────────────────────────────────────────────────────
-//  SISTEMA DE TOKENS — ACESSO AO SITE
+// SISTEMA DE TOKENS
 // ─────────────────────────────────────────────────────────────
-
-// Mapa de cargos do Discord → nível no site
-// Configure no Railway: CARGO_DONO, CARGO_ADMIN, CARGO_MOD, CARGO_EQUIPE
 const NIVEIS_TOKEN = [
   { nivel: 'dono',      label: 'Dono',      emoji: '👑', corHex: 0xf0c060, cargoId: () => CONFIG.CARGO_DONO   },
   { nivel: 'admin',     label: 'Admin',     emoji: '🔱', corHex: 0x3dd68c, cargoId: () => CONFIG.CARGO_ADMIN  },
@@ -647,7 +603,7 @@ const PERMISSOES = {
 };
 
 const tokensAtivos    = new Map();
-const TOKEN_DURACAO_MS = 60 * 60 * 1000; // 1 hora
+const TOKEN_DURACAO_MS = 60 * 60 * 1000;
 
 function gerarToken() {
   const chars = 'abcdef0123456789';
@@ -664,7 +620,6 @@ function detectarNivelToken(member) {
   return null;
 }
 
-// Limpa tokens expirados a cada 5 min
 setInterval(() => {
   const agora = Date.now();
   for (const [tk, dados] of tokensAtivos) {
@@ -674,39 +629,24 @@ setInterval(() => {
 
 async function handleToken(message) {
   if (!message.guild) return message.reply('⚠️ Este comando só funciona dentro do servidor.');
-
   let member;
   try { member = await message.guild.members.fetch(message.author.id); }
   catch { return message.reply('❌ Não consegui verificar seus cargos. Tente novamente.'); }
-
   const nivelDef = detectarNivelToken(member);
-
   if (!nivelDef) {
-    return message.reply(
-      '🚫 **Acesso negado.**\n' +
-      'Você não possui um cargo que permita gerar token de acesso.\n' +
-      '*Fale com um administrador caso acredite que isto seja um erro.*'
-    );
+    return message.reply('🚫 **Acesso negado.**\nVocê não possui um cargo que permita gerar token de acesso.\n*Fale com um administrador caso acredite que isto seja um erro.*');
   }
-
-  // Revoga token anterior do mesmo usuário
   for (const [tk, dados] of tokensAtivos) {
     if (dados.userId === message.author.id) tokensAtivos.delete(tk);
   }
-
   const token  = gerarToken();
   const expira = Date.now() + TOKEN_DURACAO_MS;
   tokensAtivos.set(token, {
-    nivel:    nivelDef.nivel,
-    userId:   message.author.id,
-    username: message.author.username,
-    expira,
-    criadoEm: Date.now(),
+    nivel: nivelDef.nivel, userId: message.author.id, username: message.author.username,
+    expira, criadoEm: Date.now(),
   });
-
   const expiraStr = new Date(expira).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   const perms     = PERMISSOES[nivelDef.nivel] || [];
-
   try {
     await message.author.send({
       embeds: [{
@@ -722,7 +662,6 @@ async function handleToken(message) {
         timestamp: new Date().toISOString(),
       }]
     });
-
     await message.reply({
       embeds: [{
         color: nivelDef.corHex,
@@ -732,15 +671,11 @@ async function handleToken(message) {
       }]
     });
   } catch {
-    // DM bloqueada — exibe por 30s no canal
     const msg = await message.reply({
       embeds: [{
         color: 0xff5a5a,
         title: '⚠️ DM bloqueada',
-        description:
-          `Não consegui te enviar DM. Abra temporariamente suas DMs.\n\n` +
-          `**Token (apaga em 30s):**\n\`\`\`\n${token}\n\`\`\`\n` +
-          `Nível: **${nivelDef.label}** · Expira às **${expiraStr}**`,
+        description: `Não consegui te enviar DM. Abra temporariamente suas DMs.\n\n**Token (apaga em 30s):**\n\`\`\`\n${token}\n\`\`\`\nNível: **${nivelDef.label}** · Expira às **${expiraStr}**`,
         footer: { text: '⚠️ Esta mensagem será apagada em 30 segundos.' },
       }]
     });
@@ -756,7 +691,6 @@ async function handleRevogar(message, args) {
   if (!nivelDef || !PERMISSOES[nivelDef.nivel].includes('token.revogar')) {
     return message.reply('🚫 Você não tem permissão para revogar tokens.');
   }
-
   const userId = args[0]?.replace(/[<@!>]/g, '');
   if (!userId) {
     const lista = [...tokensAtivos.entries()]
@@ -765,32 +699,22 @@ async function handleRevogar(message, args) {
         const mins = Math.ceil((d.expira - Date.now()) / 60000);
         return `• **${d.username}** (${d.nivel}) — expira em ${mins}min — \`${tk.slice(0, 12)}...\``;
       });
-    return message.reply(
-      lista.length
-        ? `🔑 **Tokens ativos (${lista.length}):**\n${lista.join('\n')}`
-        : '✅ Nenhum token ativo no momento.'
-    );
+    return message.reply(lista.length ? `🔑 **Tokens ativos (${lista.length}):**\n${lista.join('\n')}` : '✅ Nenhum token ativo no momento.');
   }
-
   let revogados = 0;
   for (const [tk, dados] of tokensAtivos) {
     if (dados.userId === userId) { tokensAtivos.delete(tk); revogados++; }
   }
-  return message.reply(revogados > 0
-    ? `✅ Token revogado para <@${userId}>.`
-    : `⚠️ Nenhum token ativo encontrado para <@${userId}>.`
-  );
+  return message.reply(revogados > 0 ? `✅ Token revogado para <@${userId}>.` : `⚠️ Nenhum token ativo encontrado para <@${userId}>.`);
 }
 
 // ─────────────────────────────────────────────────────────────
-//  SERVIDOR HTTP — validação de tokens pelo site
-//  O site envia: POST /validar-token  { token: "TD-..." }
+// SERVIDOR HTTP
 // ─────────────────────────────────────────────────────────────
 const servidor = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
 
   if (req.method === 'POST' && req.url === '/validar-token') {
@@ -800,20 +724,15 @@ const servidor = http.createServer((req, res) => {
       try {
         const { token } = JSON.parse(body);
         const dados     = tokensAtivos.get(token);
-
         if (!dados || dados.expira < Date.now()) {
           if (dados) tokensAtivos.delete(token);
           res.writeHead(401, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ ok: false, erro: 'Token inválido ou expirado.' }));
         }
-
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
-          ok:               true,
-          nivel:            dados.nivel,
-          username:         dados.username,
-          permissoes:       PERMISSOES[dados.nivel] || [],
-          expira:           dados.expira,
+          ok: true, nivel: dados.nivel, username: dados.username,
+          permissoes: PERMISSOES[dados.nivel] || [], expira: dados.expira,
           minutosRestantes: Math.ceil((dados.expira - Date.now()) / 60000),
         }));
       } catch {
@@ -824,13 +743,11 @@ const servidor = http.createServer((req, res) => {
     return;
   }
 
-  // Health check
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ status: 'online', tokens: tokensAtivos.size, uptime: Math.floor(process.uptime()) }));
   }
 
-  // ── Listar tokens ativos (apenas nível admin/dono)
   if (req.method === 'GET' && req.url === '/tokens') {
     const lista = [];
     for (const [token, dados] of tokensAtivos.entries()) {
@@ -840,7 +757,6 @@ const servidor = http.createServer((req, res) => {
     return res.end(JSON.stringify({ ok: true, tokens: lista }));
   }
 
-  // ── Revogar token específico
   if (req.method === 'POST' && req.url === '/revogar-token') {
     let body = '';
     req.on('data', c => body += c);
@@ -859,7 +775,6 @@ const servidor = http.createServer((req, res) => {
     return;
   }
 
-  // ── Revogar todos os tokens
   if (req.method === 'POST' && req.url === '/revogar-todos') {
     const total = tokensAtivos.size;
     tokensAtivos.clear();
@@ -867,7 +782,6 @@ const servidor = http.createServer((req, res) => {
     return res.end(JSON.stringify({ ok: true, total }));
   }
 
-  // ── Limpar tokens expirados
   if (req.method === 'POST' && req.url === '/limpar-expirados') {
     let removidos = 0;
     const agora = Date.now();
@@ -878,123 +792,72 @@ const servidor = http.createServer((req, res) => {
     return res.end(JSON.stringify({ ok: true, removidos }));
   }
 
-  // ── /roblox/resgatar — chamado pelo jogo Roblox
   if (req.method === 'POST' && req.url === '/roblox/resgatar') {
     let body = '';
     req.on('data', c => body += c);
     req.on('end', async () => {
       try {
         const { codigo, robloxId, robloxName, secret } = JSON.parse(body);
-
-        // Valida chave secreta
         if (secret !== CONFIG.ROBLOX_API_SECRET) {
           res.writeHead(403, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ ok: false, erro: 'Chave secreta inválida.' }));
         }
-
         if (!codigo || !robloxId) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ ok: false, erro: 'codigo e robloxId são obrigatórios.' }));
         }
-
-        const codigoNorm = String(codigo).toUpperCase().trim();
+        const codigoNorm  = String(codigo).toUpperCase().trim();
         const robloxIdStr = String(robloxId);
-
-        // Carrega dados
         const dbCodigos  = await lerCodigos();
         const dbVinculos = await lerVinculos();
-
-        // Verifica vínculo Discord ↔ Roblox
         const vinculo = dbVinculos.vinculos.find(v => v.robloxId === robloxIdStr);
         if (!vinculo) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ ok: false, erro: 'SEM_VINCULO', msg: 'Vincule sua conta no Discord antes de resgatar códigos! Use /vincular no servidor.' }));
         }
-
-        // Busca o código
         const c = dbCodigos.codigos.find(x => x.id === codigoNorm);
-        if (!c) {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          return res.end(JSON.stringify({ ok: false, erro: 'INVALIDO', msg: 'Código inválido ou não existe.' }));
-        }
-        if (!c.ativo) {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          return res.end(JSON.stringify({ ok: false, erro: 'INATIVO', msg: 'Este código foi desativado.' }));
-        }
-        if (c.expira && new Date(c.expira) < new Date()) {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          return res.end(JSON.stringify({ ok: false, erro: 'EXPIRADO', msg: 'Este código já expirou.' }));
-        }
-        // Verifica se já usou
-        if (c.usadoPor?.some(u => u.robloxId === robloxIdStr)) {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          return res.end(JSON.stringify({ ok: false, erro: 'JA_USADO', msg: 'Você já resgatou este código nesta conta.' }));
-        }
-        // Verifica max usos
-        if (c.maxUsos > 0 && (c.usadoPor?.length || 0) >= c.maxUsos) {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          return res.end(JSON.stringify({ ok: false, erro: 'ESGOTADO', msg: 'Este código atingiu o limite de resgates.' }));
-        }
-
-        // TUDO OK — registra o uso
+        if (!c) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, erro: 'INVALIDO', msg: 'Código inválido ou não existe.' })); }
+        if (!c.ativo) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, erro: 'INATIVO', msg: 'Este código foi desativado.' })); }
+        if (c.expira && new Date(c.expira) < new Date()) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, erro: 'EXPIRADO', msg: 'Este código já expirou.' })); }
+        if (c.usadoPor?.some(u => u.robloxId === robloxIdStr)) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, erro: 'JA_USADO', msg: 'Você já resgatou este código nesta conta.' })); }
+        if (c.maxUsos > 0 && (c.usadoPor?.length || 0) >= c.maxUsos) { res.writeHead(200); return res.end(JSON.stringify({ ok: false, erro: 'ESGOTADO', msg: 'Este código atingiu o limite de resgates.' })); }
         if (!c.usadoPor) c.usadoPor = [];
         c.usadoPor.push({ robloxId: robloxIdStr, robloxName: robloxName || '?', discordId: vinculo.discordId, usadoEm: new Date().toISOString() });
         await salvarCodigos(dbCodigos);
         invalidarCache();
-
-        // Log no canal de tickets / log
         try {
-          const guilds = client.guilds.cache.values();
-          for (const g of guilds) {
+          for (const g of client.guilds.cache.values()) {
             const canalLog = CONFIG.CANAL_LOG_TICKETS ? g.channels.cache.get(CONFIG.CANAL_LOG_TICKETS) : null;
             if (canalLog) {
-              const embedLog = new EmbedBuilder()
-                .setColor(0x3dd68c)
-                .setTitle('🎁 Código Resgatado')
+              await canalLog.send({ embeds: [new EmbedBuilder().setColor(0x3dd68c).setTitle('🎁 Código Resgatado')
                 .addFields(
-                  { name: '🔑 Código',    value: codigoNorm,                                  inline: true },
-                  { name: '🎮 Roblox',    value: robloxName || robloxIdStr,                   inline: true },
-                  { name: '💬 Discord',   value: `<@${vinculo.discordId}>`,                   inline: true },
-                  { name: '🎀 Itens',     value: c.recompensas.map(r => r.label).join('\n'),  inline: false },
-                )
-                .setTimestamp();
-              await canalLog.send({ embeds: [embedLog] });
+                  { name: '🔑 Código',  value: codigoNorm,                                 inline: true },
+                  { name: '🎮 Roblox',  value: robloxName || robloxIdStr,                  inline: true },
+                  { name: '💬 Discord', value: `<@${vinculo.discordId}>`,                  inline: true },
+                  { name: '🎀 Itens',   value: c.recompensas.map(r => r.label).join('\n'), inline: false },
+                ).setTimestamp()] });
             }
           }
         } catch {}
-
-        // Responde com as recompensas para o jogo aplicar
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          ok:          true,
-          msg:         `Código resgatado com sucesso! ${c.descricao}`,
-          recompensas: c.recompensas, // O jogo usa isso para conceder os itens
-        }));
-
+        res.end(JSON.stringify({ ok: true, msg: `Código resgatado com sucesso! ${c.descricao}`, recompensas: c.recompensas }));
       } catch (err) {
         console.error('Erro /roblox/resgatar:', err.message);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, erro: 'Erro interno do servidor.' }));
+        res.writeHead(500); res.end(JSON.stringify({ ok: false, erro: 'Erro interno do servidor.' }));
       }
     });
     return;
   }
 
-  // ── /roblox/vinculo/:robloxId — verifica se robloxId tem vínculo (usado pelo jogo)
   if (req.method === 'GET' && req.url.startsWith('/roblox/vinculo/')) {
     const robloxId = req.url.split('/').pop();
     const secret   = req.headers['x-secret'];
-    if (secret !== CONFIG.ROBLOX_API_SECRET) {
-      res.writeHead(403, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ ok: false }));
-    }
+    if (secret !== CONFIG.ROBLOX_API_SECRET) { res.writeHead(403); return res.end(JSON.stringify({ ok: false })); }
     lerVinculos().then(db => {
       const vinculo = db.vinculos.find(v => v.robloxId === String(robloxId));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, vinculado: !!vinculo, discordId: vinculo?.discordId || null }));
-    }).catch(() => {
-      res.writeHead(500); res.end(JSON.stringify({ ok: false }));
-    });
+    }).catch(() => { res.writeHead(500); res.end(JSON.stringify({ ok: false })); });
     return;
   }
 
@@ -1011,17 +874,13 @@ function chamarClaude(mensagens, promptExtra = '') {
   return new Promise((resolve, reject) => {
     const sistema = CONHECIMENTO_DO_JOGO + (promptExtra ? '\n\n' + promptExtra : '');
     const body    = JSON.stringify({
-      model:      'grok-3-mini-fast',
-      max_tokens: 500,
-      messages:   [{ role: 'system', content: sistema }, ...mensagens],
+      model: 'grok-3-mini-fast', max_tokens: 500,
+      messages: [{ role: 'system', content: sistema }, ...mensagens],
     });
     const req = https.request({
-      hostname: 'api.x.ai',
-      path:     '/v1/chat/completions',
-      method:   'POST',
-      headers:  {
-        'Content-Type':   'application/json',
-        'Authorization':  `Bearer ${CONFIG.GROK_KEY}`,
+      hostname: 'api.x.ai', path: '/v1/chat/completions', method: 'POST',
+      headers: {
+        'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.GROK_KEY}`,
         'Content-Length': Buffer.byteLength(body),
       },
     }, res => {
@@ -1054,21 +913,16 @@ function detectarIntencao(texto) {
 async function responderComIA(message, pergunta) {
   const userId   = message.author.id;
   const intencao = detectarIntencao(pergunta);
-
   if (!historicos.has(userId)) historicos.set(userId, []);
   const historico = historicos.get(userId);
-
   const promptsExtras = {
     sugestao: `O jogador está fazendo uma SUGESTÃO.\nAnalise com sabedoria:\n1. Diga se é viável para um Tower Defense\n2. Aponte pontos positivos\n3. Mencione possíveis desafios\n4. Dê uma nota de viabilidade: ★☆☆☆☆ a ★★★★★\n5. Sugira como melhorar a ideia\nSeja construtivo e entusiasmado.`,
     suporte:  `O jogador está com um PROBLEMA ou DÚVIDA TÉCNICA.\nResponda de forma direta:\n1. Identifique o problema\n2. Ofereça a solução mais provável\n3. Se não souber, peça mais detalhes ou oriente a aguardar um moderador\nSeja eficiente — jogadores com problema querem solução rápida.`,
     pergunta: `O jogador está fazendo uma PERGUNTA GERAL sobre o jogo.\nResponda de forma completa mas concisa.\nSe a resposta não estiver no seu conhecimento, diga honestamente que não sabe.`,
   };
-
   historico.push({ role: 'user', content: pergunta });
   if (historico.length > MAX_HISTORICO) historico.splice(0, historico.length - MAX_HISTORICO);
-
   await message.channel.sendTyping();
-
   try {
     const resposta = await chamarClaude([...historico], promptsExtras[intencao]);
     historico.push({ role: 'assistant', content: resposta });
@@ -1126,16 +980,13 @@ async function processarEtapa(message) {
     return message.react('✅').catch(() => {});
   }
   if (etapa === 'imagem') {
-    // Verifica se há imagem anexada
     const anexo = message.attachments.first();
     if (texto.toLowerCase() === 'pular' || !anexo) {
       dados.imagem = null;
     } else {
       const url = anexo.url;
       const ehImagem = /\.(png|jpg|jpeg|gif|webp)(\?|$)/i.test(url);
-      if (!ehImagem) {
-        return message.reply('⚠️ *Apenas imagens são aceitas (png, jpg, gif, webp). Tenta novamente ou digita `pular`.*');
-      }
+      if (!ehImagem) return message.reply('⚠️ *Apenas imagens são aceitas (png, jpg, gif, webp). Tenta novamente ou digita `pular`.*');
       dados.imagem = url;
       await message.react('🖼️').catch(() => {});
     }
@@ -1174,28 +1025,22 @@ async function processarEtapa(message) {
           if (canalAnuncio?.isTextBased()) {
             const tagLabels     = dados.tags.map(t => Object.values(TAGS).find(x => x.key === t)?.label || t).join('  ');
             const mudancasTexto = dados.mudancas.map(m => `> ⚡ ${m}`).join('\n');
-
             const embedUpdate = new EmbedBuilder()
               .setColor(0xc9a84c)
               .setTitle(`⚡ ${dados.versao} — ${dados.titulo}`)
               .setDescription(
                 (dados.subtitulo ? `*"${dados.subtitulo}"*\n\n` : '') +
-                `${tagLabels}\n\n` +
-                `**📜 Obras dos Deuses**\n${mudancasTexto}` +
+                `${tagLabels}\n\n**📜 Obras dos Deuses**\n${mudancasTexto}` +
                 (dados.proximo ? `\n\n**🔮 Próxima Atualização**\n> ${dados.proximo}` : '')
               )
               .setFooter({ text: 'Tower Deep · Alpha' })
               .setTimestamp();
-
-            // Adiciona imagem ao embed se houver
             if (dados.imagem) embedUpdate.setImage(dados.imagem);
-
             const botoesUpdate = new ActionRowBuilder().addComponents(
               new ButtonBuilder().setLabel('🌐 Site Oficial').setURL('https://italozkv.github.io/tower-deep/').setStyle(ButtonStyle.Link),
               new ButtonBuilder().setLabel('📜 Changelog Completo').setURL('https://italozkv.github.io/tower-deep/changelog.html').setStyle(ButtonStyle.Link),
               new ButtonBuilder().setLabel('🗳️ Votar em Features').setURL('https://italozkv.github.io/tower-deep/votos.html').setStyle(ButtonStyle.Link),
             );
-
             await canalAnuncio.send({ content: '@everyone', embeds: [embedUpdate], components: [botoesUpdate] });
           }
         } catch (err) { console.error('Erro ao anunciar update:', err.message); }
@@ -1210,11 +1055,7 @@ async function processarEtapa(message) {
 // ─────────────────────────────────────────────────────────────
 // SISTEMA DE TICKETS
 // ─────────────────────────────────────────────────────────────
-
-// Mapa em memória: channelId → dados do ticket
 const ticketsAtivos = new Map();
-
-// Contador persistente de tickets
 let ticketContador = 1;
 
 async function carregarTickets() {
@@ -1231,21 +1072,14 @@ async function salvarTickets() {
   return salvarArquivoJsonNoGist('tickets.json', { contador: ticketContador, tickets: lista });
 }
 
-// Categorias de ticket
 const CATEGORIAS_TICKET = {
-  suporte:   { label: '🛠️ Suporte',    emoji: '🛠️', cor: 0x4a9eff, descricao: 'Dúvidas e ajuda geral com o jogo' },
-  bug:       { label: '🐛 Bug',         emoji: '🐛', cor: 0xff5a5a, descricao: 'Reportar um bug ou problema técnico' },
-  apelacao:  { label: '⚖️ Apelação',   emoji: '⚖️', cor: 0xf0c060, descricao: 'Recorrer de uma punição recebida' },
-  parceria:  { label: '🤝 Parceria',   emoji: '🤝', cor: 0x3dd68c, descricao: 'Proposta de parceria ou colaboração' },
-  outro:     { label: '📜 Outro',       emoji: '📜', cor: 0xa78bfa, descricao: 'Outros assuntos não listados acima' },
+  suporte:  { label: '🛠️ Suporte',   emoji: '🛠️', cor: 0x4a9eff, descricao: 'Dúvidas e ajuda geral com o jogo' },
+  bug:      { label: '🐛 Bug',        emoji: '🐛', cor: 0xff5a5a, descricao: 'Reportar um bug ou problema técnico' },
+  apelacao: { label: '⚖️ Apelação',  emoji: '⚖️', cor: 0xf0c060, descricao: 'Recorrer de uma punição recebida' },
+  parceria: { label: '🤝 Parceria',  emoji: '🤝', cor: 0x3dd68c, descricao: 'Proposta de parceria ou colaboração' },
+  outro:    { label: '📜 Outro',      emoji: '📜', cor: 0xa78bfa, descricao: 'Outros assuntos não listados acima' },
 };
 
-// Notas de avaliação
-const AVALIACOES = {
-  '⭐': 1, '⭐⭐': 2, '⭐⭐⭐': 3, '⭐⭐⭐⭐': 4, '⭐⭐⭐⭐⭐': 5,
-};
-
-// Envia o painel de abertura de tickets para um canal
 async function enviarPainelTicket(channel) {
   const embed = new EmbedBuilder()
     .setColor(0xc9a84c)
@@ -1265,6 +1099,7 @@ async function enviarPainelTicket(channel) {
     .setFooter({ text: 'Tower Deep · Não abra tickets desnecessários.' })
     .setTimestamp();
 
+  // CORREÇÃO: usando StringSelectMenuOptionBuilder em vez de objetos planos
   const menu = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId('ticket_criar')
@@ -1275,24 +1110,17 @@ async function enviarPainelTicket(channel) {
             .setLabel(cat.label)
             .setDescription(cat.descricao)
             .setValue(value)
-            .setEmoji(cat.emoji)
         )
       )
   );
-
   await channel.send({ embeds: [embed], components: [menu] });
 }
 
-// Abre o canal do ticket
 async function abrirTicket(interaction, categoria) {
   const guild   = interaction.guild;
   const user    = interaction.user;
   const catInfo = CATEGORIAS_TICKET[categoria];
-
-  // Verifica se o usuário já tem um ticket aberto
-  const ticketExistente = [...ticketsAtivos.values()].find(
-    t => t.userId === user.id && t.status === 'aberto'
-  );
+  const ticketExistente = [...ticketsAtivos.values()].find(t => t.userId === user.id && t.status === 'aberto');
   if (ticketExistente) {
     const canalExistente = guild.channels.cache.get(ticketExistente.channelId);
     return interaction.reply({
@@ -1300,122 +1128,61 @@ async function abrirTicket(interaction, categoria) {
       ephemeral: true,
     });
   }
-
   await interaction.deferReply({ ephemeral: true });
-
-  // Monta permissões do canal
   const permissoes = [
-    { id: guild.id,  deny:  [PermissionFlagsBits.ViewChannel] }, // @everyone não vê
+    { id: guild.id,  deny:  [PermissionFlagsBits.ViewChannel] },
     { id: user.id,   allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
   ];
-  // Dono, Admin, Mod, Equipe veem o canal
-  for (const [chave, id] of Object.entries({ CARGO_DONO: CONFIG.CARGO_DONO, CARGO_ADMIN: CONFIG.CARGO_ADMIN, CARGO_MOD: CONFIG.CARGO_MOD, CARGO_EQUIPE: CONFIG.CARGO_EQUIPE })) {
+  for (const id of [CONFIG.CARGO_DONO, CONFIG.CARGO_ADMIN, CONFIG.CARGO_MOD, CONFIG.CARGO_EQUIPE]) {
     if (id) permissoes.push({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages] });
   }
-
   const numero = ticketContador++;
   const nomeCanal = `ticket-${numero.toString().padStart(4, '0')}-${user.username.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12)}`;
-
   let canal;
   try {
-    const options = {
-      name: nomeCanal,
-      type: ChannelType.GuildText,
-      permissionOverwrites: permissoes,
-      topic: `${catInfo.emoji} ${catInfo.label} | ${user.tag} | Ticket #${numero}`,
-    };
+    const options = { name: nomeCanal, type: ChannelType.GuildText, permissionOverwrites: permissoes, topic: `${catInfo.emoji} ${catInfo.label} | ${user.tag} | Ticket #${numero}` };
     if (CONFIG.CATEGORIA_TICKETS) options.parent = CONFIG.CATEGORIA_TICKETS;
     canal = await guild.channels.create(options);
   } catch (err) {
     console.error('Erro ao criar canal de ticket:', err.message);
     return interaction.editReply({ content: '⚠️ *Os deuses não conseguiram abrir a câmara. Verifique as permissões do bot.*' });
   }
-
-  // Registra o ticket
-  const ticket = {
-    id:          numero,
-    channelId:   canal.id,
-    userId:      user.id,
-    username:    user.tag,
-    categoria,
-    status:      'aberto',
-    abertoPor:   user.id,
-    criadoEm:    Date.now(),
-    fechadoEm:   null,
-    resolvidoPor: null,
-    avaliacao:   null,
-    mensagens:   [],
-  };
+  const ticket = { id: numero, channelId: canal.id, userId: user.id, username: user.tag, categoria, status: 'aberto', abertoPor: user.id, criadoEm: Date.now(), fechadoEm: null, resolvidoPor: null, avaliacao: null, mensagens: [] };
   ticketsAtivos.set(canal.id, ticket);
   salvarTickets().catch(err => console.error('Erro ao salvar tickets:', err.message));
-
-  // Embed de abertura no canal do ticket
   const embedAbertura = new EmbedBuilder()
     .setColor(catInfo.cor)
     .setTitle(`${catInfo.emoji} Ticket #${numero} — ${catInfo.label}`)
-    .setDescription(
-      `Bem-vindo, ${user}!\n\n` +
-      `*Os deuses do Olimpo te ouvem, mortal.*\n\n` +
-      `**Descreve teu problema com o máximo de detalhes possível.**\n` +
-      `Nossa equipe responderá o mais breve possível.`
-    )
+    .setDescription(`Bem-vindo, ${user}!\n\n*Os deuses do Olimpo te ouvem, mortal.*\n\n**Descreve teu problema com o máximo de detalhes possível.**\nNossa equipe responderá o mais breve possível.`)
     .addFields(
-      { name: '📋 Categoria',  value: catInfo.label,                                      inline: true },
-      { name: '👤 Aberto por', value: user.tag,                                           inline: true },
-      { name: '🕐 Aberto em',  value: `<t:${Math.floor(Date.now() / 1000)}:F>`,           inline: false },
+      { name: '📋 Categoria',  value: catInfo.label,                                inline: true },
+      { name: '👤 Aberto por', value: user.tag,                                     inline: true },
+      { name: '🕐 Aberto em',  value: `<t:${Math.floor(Date.now() / 1000)}:F>`,     inline: false },
     )
     .setFooter({ text: 'Tower Deep · Use os botões abaixo para gerenciar este ticket.' })
     .setTimestamp();
-
   const botoesLink = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setLabel('🌐 Site Oficial')
-      .setURL('https://italozkv.github.io/tower-deep/')
-      .setStyle(ButtonStyle.Link),
-    new ButtonBuilder()
-      .setLabel('📖 Wiki')
-      .setURL('https://italozkv.github.io/tower-deep/wiki.html')
-      .setStyle(ButtonStyle.Link),
+    new ButtonBuilder().setLabel('🌐 Site Oficial').setURL('https://italozkv.github.io/tower-deep/').setStyle(ButtonStyle.Link),
+    new ButtonBuilder().setLabel('📖 Wiki').setURL('https://italozkv.github.io/tower-deep/wiki.html').setStyle(ButtonStyle.Link),
   );
-
-  // Botões de controle
   const botoesControle = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('ticket_fechar').setLabel('🔒 Fechar Ticket').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId('ticket_resolver').setLabel('✅ Marcar Resolvido').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId('ticket_assumir').setLabel('⚔️ Assumir').setStyle(ButtonStyle.Secondary),
   );
-
   await canal.send({ content: `${user} | <@&${CONFIG.CARGO_SUPORTE || CONFIG.CARGO_MOD || ''}>`, embeds: [embedAbertura], components: [botoesControle, botoesLink] });
-
-  await interaction.editReply({
-    content: `${catInfo.emoji} *A câmara foi aberta, mortal!* → ${canal}\n*Dirija-se até lá para falar com nossa equipe.*`,
-  });
-
-  // Log no canal de logs
+  await interaction.editReply({ content: `${catInfo.emoji} *A câmara foi aberta, mortal!* → ${canal}\n*Dirija-se até lá para falar com nossa equipe.*` });
   await logTicket(guild, `🎫 **Ticket Aberto** — #${numero}\n👤 **Usuário:** ${user.tag}\n📋 **Categoria:** ${catInfo.label}\n📌 **Canal:** ${canal}`);
 }
 
-// Fecha o ticket (com transcrição)
 async function fecharTicket(interaction, ticket) {
   const guild = interaction.guild;
   const canal = interaction.channel;
-
-  if (ticket.status === 'fechado') {
-    return interaction.reply({ content: '⚠️ *Este ticket já está fechado.*', ephemeral: true });
-  }
-
+  if (ticket.status === 'fechado') return interaction.reply({ content: '⚠️ *Este ticket já está fechado.*', ephemeral: true });
   await interaction.deferReply();
-
-  // Coleta transcrição
-  let transcricao = `📜 TRANSCRIÇÃO — Ticket #${ticket.id}\n`;
-  transcricao    += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-  transcricao    += `👤 Aberto por: ${ticket.username}\n`;
-  transcricao    += `📋 Categoria: ${CATEGORIAS_TICKET[ticket.categoria]?.label || ticket.categoria}\n`;
-  transcricao    += `🕐 Aberto em: ${new Date(ticket.criadoEm).toLocaleString('pt-BR')}\n`;
-  transcricao    += `🔒 Fechado em: ${new Date().toLocaleString('pt-BR')}\n`;
-  transcricao    += `🔒 Fechado por: ${interaction.user.tag}\n`;
-  transcricao    += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-
+  let transcricao = `📜 TRANSCRIÇÃO — Ticket #${ticket.id}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  transcricao += `👤 Aberto por: ${ticket.username}\n📋 Categoria: ${CATEGORIAS_TICKET[ticket.categoria]?.label || ticket.categoria}\n`;
+  transcricao += `🕐 Aberto em: ${new Date(ticket.criadoEm).toLocaleString('pt-BR')}\n🔒 Fechado em: ${new Date().toLocaleString('pt-BR')}\n🔒 Fechado por: ${interaction.user.tag}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
   try {
     const msgs = await canal.messages.fetch({ limit: 100 });
     const msgsOrdenadas = [...msgs.values()].reverse();
@@ -1424,63 +1191,33 @@ async function fecharTicket(interaction, ticket) {
       transcricao += `[${new Date(m.createdTimestamp).toLocaleTimeString('pt-BR')}] ${m.author.tag}: ${m.content || '[embed/arquivo]'}\n`;
     }
   } catch { transcricao += '*(Não foi possível coletar mensagens)*\n'; }
-
-  // Atualiza status
   ticket.status    = 'fechado';
   ticket.fechadoEm = Date.now();
   ticketsAtivos.delete(canal.id);
   await salvarTickets().catch(() => {});
-
-  // Embed de fechamento
   const embedFechado = new EmbedBuilder()
     .setColor(0x555555)
     .setTitle(`🔒 Ticket #${ticket.id} Fechado`)
-    .setDescription(
-      `*A câmara foi selada pelos deuses do Olimpo.*\n\n` +
-      `**Fechado por:** ${interaction.user.tag}\n` +
-      `**Fechado em:** <t:${Math.floor(Date.now() / 1000)}:F>\n\n` +
-      `*O canal será deletado em 10 segundos.*`
-    )
-    .setColor(0x555555);
-
+    .setDescription(`*A câmara foi selada pelos deuses do Olimpo.*\n\n**Fechado por:** ${interaction.user.tag}\n**Fechado em:** <t:${Math.floor(Date.now() / 1000)}:F>\n\n*O canal será deletado em 10 segundos.*`);
   await interaction.editReply({ embeds: [embedFechado] });
-
-  // Envia transcrição para o usuário (DM)
   try {
     const userObj = await guild.members.fetch(ticket.userId);
     if (userObj) {
-      await userObj.send({
-        content: `🔒 **Teu ticket #${ticket.id} foi fechado.**\n\nSegue a transcrição da conversa:\n\`\`\`\n${transcricao.slice(0, 1800)}\n\`\`\``,
-      });
-
-      // Envia avaliação por DM
+      await userObj.send({ content: `🔒 **Teu ticket #${ticket.id} foi fechado.**\n\nSegue a transcrição da conversa:\n\`\`\`\n${transcricao.slice(0, 1800)}\n\`\`\`` });
       await enviarAvaliacaoDM(userObj.user, ticket);
     }
-  } catch { /* DM bloqueada */ }
-
-  // Log + transcrição completa
-  await logTicket(guild,
-    `🔒 **Ticket Fechado** — #${ticket.id}\n👤 **Usuário:** ${ticket.username}\n🔒 **Fechado por:** ${interaction.user.tag}`,
-    transcricao
-  );
-
-  // Deleta o canal após 10 segundos
+  } catch {}
+  await logTicket(guild, `🔒 **Ticket Fechado** — #${ticket.id}\n👤 **Usuário:** ${ticket.username}\n🔒 **Fechado por:** ${interaction.user.tag}`, transcricao);
   setTimeout(() => canal.delete(`Ticket #${ticket.id} fechado`).catch(() => {}), 10000);
 }
 
-// Envia DM de avaliação ao usuário
 async function enviarAvaliacaoDM(user, ticket) {
   try {
     const embed = new EmbedBuilder()
       .setColor(0xc9a84c)
       .setTitle('⭐ Avalie o Atendimento — Tower Deep')
-      .setDescription(
-        `*Teu ticket #${ticket.id} foi encerrado.*\n\n` +
-        `Como foi o atendimento da nossa equipe?\n` +
-        `Seleciona uma nota abaixo — tua opinião é divina para nós! 🙏`
-      )
+      .setDescription(`*Teu ticket #${ticket.id} foi encerrado.*\n\nComo foi o atendimento da nossa equipe?\nSeleciona uma nota abaixo — tua opinião é divina para nós! 🙏`)
       .setFooter({ text: 'Tower Deep · Avaliação expira em 24h' });
-
     const botoesAvaliacao = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`avaliar_1_${ticket.id}`).setLabel('⭐').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`avaliar_2_${ticket.id}`).setLabel('⭐⭐').setStyle(ButtonStyle.Secondary),
@@ -1488,12 +1225,10 @@ async function enviarAvaliacaoDM(user, ticket) {
       new ButtonBuilder().setCustomId(`avaliar_4_${ticket.id}`).setLabel('⭐⭐⭐⭐').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`avaliar_5_${ticket.id}`).setLabel('⭐⭐⭐⭐⭐').setStyle(ButtonStyle.Primary),
     );
-
     await user.send({ embeds: [embed], components: [botoesAvaliacao] });
-  } catch { /* DM bloqueada */ }
+  } catch {}
 }
 
-// Registra log no canal de logs
 async function logTicket(guild, mensagem, transcricao = null) {
   if (!CONFIG.CANAL_LOG_TICKETS) return;
   try {
@@ -1557,15 +1292,13 @@ const slashCommands = [
     .setName('changelog').setDescription('📜 Gerenciar os changelogs do site')
     .addSubcommand(sub => sub.setName('listar').setDescription('📋 Listar todos os changelogs publicados'))
     .addSubcommand(sub => sub.setName('apagar').setDescription('🗑️ Apagar um changelog pelo número')
-      .addIntegerOption(opt => opt.setName('numero').setDescription('Número do changelog na lista (use /changelog listar para ver)').setRequired(true)))
+      .addIntegerOption(opt => opt.setName('numero').setDescription('Número do changelog na lista').setRequired(true)))
     .addSubcommand(sub => sub.setName('editar').setDescription('✏️ Editar título ou subtítulo de um changelog')
       .addIntegerOption(opt => opt.setName('numero').setDescription('Número do changelog na lista').setRequired(true))
       .addStringOption(opt => opt.setName('campo').setDescription('Campo a editar').setRequired(true)
         .addChoices(
-          { name: '📖 Título',    value: 'titulo'    },
-          { name: '🌟 Subtítulo', value: 'subtitulo' },
-          { name: '🖼️ Imagem (URL)', value: 'imagem' },
-          { name: '🔮 Próxima update', value: 'proximo' },
+          { name: '📖 Título', value: 'titulo' }, { name: '🌟 Subtítulo', value: 'subtitulo' },
+          { name: '🖼️ Imagem (URL)', value: 'imagem' }, { name: '🔮 Próxima update', value: 'proximo' },
         ))
       .addStringOption(opt => opt.setName('valor').setDescription('Novo valor para o campo').setRequired(true)))
     .addSubcommand(sub => sub.setName('imagem').setDescription('🖼️ Adicionar/trocar imagem de um changelog')
@@ -1583,44 +1316,26 @@ const slashCommands = [
       .addUserOption(opt => opt.setName('usuario').setDescription('Usuário a remover').setRequired(true)))
     .addSubcommand(sub => sub.setName('listar').setDescription('📜 Listar todos os tickets abertos (staff)')),
   new SlashCommandBuilder()
-    .setName('verificar')
-    .setDescription('✅ Vincule sua conta do Roblox ao Discord')
+    .setName('verificar').setDescription('✅ Vincule sua conta do Roblox ao Discord')
     .addStringOption(opt => opt.setName('usuario').setDescription('Seu nome de usuário no Roblox').setRequired(true)),
-
-  // 🎁 Sistema de códigos
   new SlashCommandBuilder()
-    .setName('gencodigo')
-    .setDescription('Gerar um código de resgate com recompensas (Admin)')
+    .setName('gencodigo').setDescription('🎁 Gerar um código de resgate com recompensas (Admin)')
     .addStringOption(opt => opt.setName('descricao').setDescription('Descrição do código (ex: Evento de Natal)').setRequired(true))
     .addIntegerOption(opt => opt.setName('maxusos').setDescription('Quantas contas podem usar (padrão: ilimitado)').setRequired(false))
     .addIntegerOption(opt => opt.setName('expira_horas').setDescription('Expira em X horas (padrão: nunca)').setRequired(false)),
-
   new SlashCommandBuilder()
-    .setName('codigo')
-    .setDescription('📋 Gerenciar códigos de resgate (Admin)')
+    .setName('codigo').setDescription('📋 Gerenciar códigos de resgate (Admin)')
     .addSubcommand(sub => sub.setName('listar').setDescription('📜 Listar todos os códigos'))
     .addSubcommand(sub => sub.setName('desativar').setDescription('🚫 Desativar um código')
       .addStringOption(opt => opt.setName('codigo').setDescription('Código a desativar').setRequired(true)))
     .addSubcommand(sub => sub.setName('info').setDescription('🔍 Ver detalhes de um código')
       .addStringOption(opt => opt.setName('codigo').setDescription('Código a consultar').setRequired(true))),
-
   new SlashCommandBuilder()
-    .setName('vincular')
-    .setDescription('🔗 Vincule sua conta do Roblox para usar códigos de resgate')
+    .setName('vincular').setDescription('🔗 Vincule sua conta do Roblox para usar códigos de resgate')
     .addStringOption(opt => opt.setName('usuario').setDescription('Seu nome de usuário exato no Roblox').setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('minhaconta')
-    .setDescription('👤 Ver sua conta Roblox vinculada e códigos resgatados'),
-
-  new SlashCommandBuilder()
-    .setName('itemcadastrar')
-    .setDescription('➕ Cadastrar novo item no catálogo de recompensas (Admin)'),
-
-  new SlashCommandBuilder()
-    .setName('itemlistar')
-    .setDescription('📦 Ver todos os itens do catálogo por categoria (Admin)'),
-
+  new SlashCommandBuilder().setName('minhaconta').setDescription('👤 Ver sua conta Roblox vinculada e códigos resgatados'),
+  new SlashCommandBuilder().setName('itemcadastrar').setDescription('➕ Cadastrar novo item no catálogo de recompensas (Admin)'),
+  new SlashCommandBuilder().setName('itemlistar').setDescription('📦 Ver todos os itens do catálogo por categoria (Admin)'),
 ].map(cmd => cmd.toJSON());
 
 async function registrarSlashCommands(clientId) {
@@ -1629,8 +1344,11 @@ async function registrarSlashCommands(clientId) {
   catch (err) { console.error('Erro ao registrar slash commands:', err.message); }
 }
 
-
-// Helper do /gencodigo — avança para o próximo tipo ou finaliza e gera código
+// ─────────────────────────────────────────────────────────────
+// HELPER /gencodigo — avança para o próximo tipo ou finaliza
+// CORREÇÃO PRINCIPAL: StringSelectMenuOptionBuilder em todos
+// os menus, sem campo "emoji" (causa erro no discord.js v14)
+// ─────────────────────────────────────────────────────────────
 async function avancarRecompensa(interaction, sessao, adminId) {
   const proxIdx = sessao.tiposIdx;
 
@@ -1638,20 +1356,28 @@ async function avancarRecompensa(interaction, sessao, adminId) {
     const proxTipo = sessao.tiposSelecionados[proxIdx];
 
     if (proxTipo === 'item') {
-      // Mostrar seletor de categoria
       const catalogo   = await getCatalogoCompleto();
       const categorias = [...new Set(catalogo.map(i => i.categoria))].sort();
-      const opsCat = categorias.slice(0, 25).map(c => ({
-        label: c, value: `cat:${c}`,
-        description: `${catalogo.filter(i => i.categoria === c).length} itens`,
-      }));
+
+      // CORREÇÃO: StringSelectMenuOptionBuilder sem emoji
+      const opsCat = categorias.slice(0, 25).map(c =>
+        new StringSelectMenuOptionBuilder()
+          .setLabel(c.slice(0, 100))
+          .setValue(`cat:${c}`)
+          .setDescription(`${catalogo.filter(i => i.categoria === c).length} itens`)
+      );
+
       const menuCat = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
           .setCustomId(`gc_cat_${adminId}`)
           .setPlaceholder('📂 Escolha a categoria do próximo item...')
           .addOptions(opsCat)
       );
-      const recompListadas = sessao.recompensas.map(r => r.label).join('\n');
+
+      const recompListadas = sessao.recompensas.length
+        ? sessao.recompensas.map(r => r.label).join('\n')
+        : '*Nenhuma ainda*';
+
       return interaction.editReply({
         embeds: [new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA)
           .setTitle(`🎁 Recompensa ${proxIdx + 1}/${sessao.tiposSelecionados.length}`)
@@ -1659,7 +1385,6 @@ async function avancarRecompensa(interaction, sessao, adminId) {
         components: [menuCat],
       });
     } else {
-      // Pedir quantidade via modal
       const info = TIPOS_RECOMPENSA[proxTipo];
       const modal = new ModalBuilder()
         .setCustomId(`gc_qtd_${adminId}_${proxIdx}`)
@@ -1675,7 +1400,7 @@ async function avancarRecompensa(interaction, sessao, adminId) {
     }
   }
 
-  // TODAS as recompensas coletadas — gerar o código!
+  // Todas recompensas coletadas — gerar o código
   try {
     const codigo = gerarCodigo();
     const db     = await lerCodigos();
@@ -1693,16 +1418,15 @@ async function avancarRecompensa(interaction, sessao, adminId) {
       .setColor(CONFIG.CORES.SUCESSO)
       .setTitle('✅ Código Gerado!')
       .addFields(
-        { name: '🎁 Código',      value: '`' + codigo + '`',                                                 inline: false },
-        { name: '📝 Descrição',   value: sessao.descricao,                                                   inline: true  },
-        { name: '👥 Max Usos',    value: sessao.maxUsos ? String(sessao.maxUsos) : 'Ilimitado',              inline: true  },
-        { name: '⏰ Expira',       value: expira ? new Date(expira).toLocaleDateString('pt-BR') : 'Nunca',   inline: true  },
+        { name: '🎁 Código',      value: '`' + codigo + '`',                                               inline: false },
+        { name: '📝 Descrição',   value: sessao.descricao,                                                 inline: true  },
+        { name: '👥 Max Usos',    value: sessao.maxUsos ? String(sessao.maxUsos) : 'Ilimitado',            inline: true  },
+        { name: '⏰ Expira',       value: expira ? new Date(expira).toLocaleDateString('pt-BR') : 'Nunca', inline: true  },
         { name: '🎀 Recompensas', value: sessao.recompensas.map(r => r.label).join('\n'),                  inline: false },
       )
       .setFooter({ text: 'Anunciado no canal de códigos' });
     await interaction.editReply({ embeds: [embedConf], components: [] });
 
-    // Anúncio público
     const guild = interaction.guild;
     const canalCodigos = CONFIG.CANAL_CODIGOS
       ? guild?.channels?.cache?.get(CONFIG.CANAL_CODIGOS)
@@ -1714,10 +1438,10 @@ async function avancarRecompensa(interaction, sessao, adminId) {
         .setTitle('🎁 NOVO CÓDIGO DE RESGATE!')
         .setDescription(`*Os deuses do Olimpo presenteiam os mortais dedicados!*\n\n📜 **${sessao.descricao}**`)
         .addFields(
-          { name: '🔑 Código',      value: '## `' + codigo + '`',                                            inline: false },
-          { name: '🎀 Recompensas', value: sessao.recompensas.map(r => r.label).join('\n'),                 inline: false },
-          { name: '👥 Usos',        value: sessao.maxUsos ? `${sessao.maxUsos} usos` : 'Ilimitado',          inline: true  },
-          { name: '⏰ Válido até',  value: expira ? new Date(expira).toLocaleDateString('pt-BR') : 'Sem prazo', inline: true },
+          { name: '🔑 Código',      value: '## `' + codigo + '`',                                              inline: false },
+          { name: '🎀 Recompensas', value: sessao.recompensas.map(r => r.label).join('\n'),                    inline: false },
+          { name: '👥 Usos',        value: sessao.maxUsos ? `${sessao.maxUsos} usos` : 'Ilimitado',            inline: true  },
+          { name: '⏰ Válido até',  value: expira ? new Date(expira).toLocaleDateString('pt-BR') : 'Sem prazo',inline: true  },
         )
         .addFields({ name: '📖 Como resgatar?', value: 'Abra o jogo → Configurações → Código de Resgate!' })
         .setFooter({ text: 'Tower Deep · Código válido 1x por conta Roblox' })
@@ -1740,7 +1464,7 @@ async function avancarRecompensa(interaction, sessao, adminId) {
 // ─────────────────────────────────────────────────────────────
 client.on('interactionCreate', async (interaction) => {
   try {
-    // /bug
+
     if (interaction.isChatInputCommand() && interaction.commandName === 'bug') {
       const modal = new ModalBuilder().setCustomId('modal_bug').setTitle('Relato de Anomalia Divina');
       modal.addComponents(
@@ -1751,7 +1475,6 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.showModal(modal);
     }
 
-    // /sugestao
     if (interaction.isChatInputCommand() && interaction.commandName === 'sugestao') {
       const modal = new ModalBuilder().setCustomId('modal_sugestao').setTitle('Visão para o Olimpo');
       modal.addComponents(
@@ -1762,7 +1485,6 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.showModal(modal);
     }
 
-    // submit bug
     if (interaction.isModalSubmit() && interaction.customId === 'modal_bug') {
       const bugTitulo = interaction.fields.getTextInputValue('bug_titulo');
       const bugDesc   = interaction.fields.getTextInputValue('bug_descricao');
@@ -1781,7 +1503,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // submit sugestao
     if (interaction.isModalSubmit() && interaction.customId === 'modal_sugestao') {
       const sugTitulo = interaction.fields.getTextInputValue('sug_titulo');
       const sugDesc   = interaction.fields.getTextInputValue('sug_descricao');
@@ -1803,7 +1524,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // /enquete
     if (interaction.isChatInputCommand() && interaction.commandName === 'enquete') {
       if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas guardiões do Olimpo podem proclamar enquetes.*', ephemeral: true });
       const titulo    = interaction.options.getString('titulo');
@@ -1823,7 +1543,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // /limpar
     if (interaction.isChatInputCommand() && interaction.commandName === 'limpar') {
       if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Os deuses negam tua solicitação, mortal.*', ephemeral: true });
       const quantidade = interaction.options.getInteger('quantidade');
@@ -1838,7 +1557,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // /anunciar
     if (interaction.isChatInputCommand() && interaction.commandName === 'anunciar') {
       if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Os deuses negam tua solicitação, mortal.*', ephemeral: true });
       const mensagem = interaction.options.getString('mensagem');
@@ -1846,29 +1564,17 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.reply({ content: '✅ *Teu anúncio foi proclamado no canal, guardião.*', ephemeral: true });
       try {
         const embedAnuncio = new EmbedBuilder()
-          .setColor(0xc9a84c)
-          .setTitle(`📢 ${titulo}`)
-          .setDescription(mensagem)
-          .setFooter({ text: `Proclamado por ${interaction.user.username} · Tower Deep` })
-          .setTimestamp();
-
+          .setColor(0xc9a84c).setTitle(`📢 ${titulo}`).setDescription(mensagem)
+          .setFooter({ text: `Proclamado por ${interaction.user.username} · Tower Deep` }).setTimestamp();
         const botoesAnuncio = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setLabel('🌐 Site Oficial')
-            .setURL('https://italozkv.github.io/tower-deep/')
-            .setStyle(ButtonStyle.Link),
-          new ButtonBuilder()
-            .setLabel('📜 Changelog')
-            .setURL('https://italozkv.github.io/tower-deep/changelog.html')
-            .setStyle(ButtonStyle.Link),
+          new ButtonBuilder().setLabel('🌐 Site Oficial').setURL('https://italozkv.github.io/tower-deep/').setStyle(ButtonStyle.Link),
+          new ButtonBuilder().setLabel('📜 Changelog').setURL('https://italozkv.github.io/tower-deep/changelog.html').setStyle(ButtonStyle.Link),
         );
-
         await interaction.channel.send({ embeds: [embedAnuncio], components: [botoesAnuncio] });
       } catch (err) { console.error('Erro ao anunciar:', err.message); }
       return;
     }
 
-    // /roadmap
     if (interaction.isChatInputCommand() && interaction.commandName === 'roadmap') {
       if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas guardiões do Olimpo podem editar os pergaminhos do roadmap.*', ephemeral: true });
       const sub = interaction.options.getSubcommand();
@@ -1884,26 +1590,26 @@ client.on('interactionCreate', async (interaction) => {
           if (versoes.find(v => v.versao === versao)) return interaction.editReply({ content: `⚠️ *A versão ${versao} já existe nos pergaminhos.*` });
           versoes.push({ versao, titulo, status, data, lore, itens: [] });
           await salvarRoadmap(versoes);
-          return interaction.editReply({ content: `🗺️ **${versao} — ${titulo}** adicionada ao roadmap!\n*Visível em: https://italozkv.github.io/tower-deep/roadmap.html*` });
+          return interaction.editReply({ content: `🗺️ **${versao} — ${titulo}** adicionada ao roadmap!` });
         }
         if (sub === 'item') {
           const versao = interaction.options.getString('versao');
           const texto  = interaction.options.getString('texto');
           const badge  = interaction.options.getString('badge') || 'Novo';
           const v = versoes.find(v => v.versao === versao);
-          if (!v) return interaction.editReply({ content: `⚠️ *Versão ${versao} não encontrada. Use /roadmap adicionar primeiro.*` });
+          if (!v) return interaction.editReply({ content: `⚠️ *Versão ${versao} não encontrada.*` });
           v.itens = v.itens || [];
           v.itens.push({ texto, badge, concluido: false });
           await salvarRoadmap(versoes);
           return interaction.editReply({ content: `✅ *Item adicionado em ${versao}:* ${texto}` });
         }
         if (sub === 'concluir') {
-          const versao     = interaction.options.getString('versao');
-          const itemBusca  = interaction.options.getString('item').toLowerCase();
+          const versao    = interaction.options.getString('versao');
+          const itemBusca = interaction.options.getString('item').toLowerCase();
           const v = versoes.find(v => v.versao === versao);
           if (!v) return interaction.editReply({ content: `⚠️ *Versão ${versao} não encontrada.*` });
           const item = v.itens?.find(i => i.texto.toLowerCase().includes(itemBusca));
-          if (!item) return interaction.editReply({ content: `⚠️ *Item não encontrado. Verifica o texto.*` });
+          if (!item) return interaction.editReply({ content: `⚠️ *Item não encontrado.*` });
           item.concluido = true;
           await salvarRoadmap(versoes);
           return interaction.editReply({ content: `✓ *Item marcado como concluído em ${versao}:* ${item.texto}` });
@@ -1921,7 +1627,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // /rank
     if (interaction.isChatInputCommand() && interaction.commandName === 'rank') {
       const userId = interaction.user.id;
       if (!xpData.has(userId)) xpData.set(userId, { xp: 0, nivel: 1, lastMsg: 0 });
@@ -1929,12 +1634,9 @@ client.on('interactionCreate', async (interaction) => {
       const nivel   = getNivel(dados.xp);
       const proximo = getProximoNivel(dados.xp);
       const faltam  = proximo ? proximo.xpMin - dados.xp : 0;
-
-      // Barra de progresso
       const xpAtualNivel  = dados.xp - nivel.xpMin;
       const xpNecessario  = proximo ? proximo.xpMin - nivel.xpMin : 1;
       const barra = proximo ? gerarBarraProgresso(xpAtualNivel, xpNecessario, 12) : '████████████ 100%';
-
       const medalhas = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
       const top5     = [...xpData.entries()].sort((a, b) => b[1].xp - a[1].xp).slice(0, 5);
       let topTexto   = '';
@@ -1956,180 +1658,115 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ──────────────────────────────────────────────────────────
-    // /changelog — gerenciar changelogs
-    // ──────────────────────────────────────────────────────────
     if (interaction.isChatInputCommand() && interaction.commandName === 'changelog') {
-      // Apenas Dono e Admin (verifica cargos)
       const member = interaction.member;
-      const temAcesso = ehAdmin(member);
-      if (!temAcesso) return interaction.reply({ content: '⚠️ *Apenas o Dono ou Admin do Olimpo pode editar os anais eternos.*', ephemeral: true });
-
+      if (!ehAdmin(member)) return interaction.reply({ content: '⚠️ *Apenas o Dono ou Admin do Olimpo pode editar os anais eternos.*', ephemeral: true });
       const sub = interaction.options.getSubcommand();
       await interaction.deferReply({ ephemeral: true });
-
       try {
         const dadosGist = await lerGist();
         const updates   = dadosGist.updates || [];
-
-        // /changelog listar
         if (sub === 'listar') {
           if (!updates.length) return interaction.editReply({ content: '📜 *Nenhum decreto nos anais eternos ainda.*' });
-          const lista = updates.map((u, i) =>
-            `**#${i + 1}** — \`${u.versao}\` — **${u.titulo}** *(${u.data})* ${u.imagem ? '🖼️' : ''}`
-          ).join('\n');
-          return interaction.editReply({
-            content: `📜 **ANAIS DO OLIMPO — ${updates.length} decreto(s)**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${lista}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Use o número para editar ou apagar.*`,
-          });
+          const lista = updates.map((u, i) => `**#${i + 1}** — \`${u.versao}\` — **${u.titulo}** *(${u.data})* ${u.imagem ? '🖼️' : ''}`).join('\n');
+          return interaction.editReply({ content: `📜 **ANAIS DO OLIMPO — ${updates.length} decreto(s)**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${lista}` });
         }
-
-        // /changelog apagar
         if (sub === 'apagar') {
           const num = interaction.options.getInteger('numero');
           if (num < 1 || num > updates.length) return interaction.editReply({ content: `⚠️ *Número inválido. Use entre 1 e ${updates.length}.*` });
           const removido = updates.splice(num - 1, 1)[0];
           dadosGist.updates = updates;
           await salvarGist(dadosGist);
-          return interaction.editReply({ content: `🗑️ **Decreto apagado dos anais eternos:**\n\`${removido.versao}\` — ${removido.titulo}\n\n*O site será atualizado automaticamente.*` });
+          return interaction.editReply({ content: `🗑️ **Decreto apagado:** \`${removido.versao}\` — ${removido.titulo}` });
         }
-
-        // /changelog editar
         if (sub === 'editar') {
           const num   = interaction.options.getInteger('numero');
           const campo = interaction.options.getString('campo');
           const valor = interaction.options.getString('valor');
-          if (num < 1 || num > updates.length) return interaction.editReply({ content: `⚠️ *Número inválido. Use entre 1 e ${updates.length}.*` });
+          if (num < 1 || num > updates.length) return interaction.editReply({ content: `⚠️ *Número inválido.*` });
           const alvo = updates[num - 1];
-          const campoNomes = { titulo: '📖 Título', subtitulo: '🌟 Subtítulo', imagem: '🖼️ Imagem', proximo: '🔮 Próxima update' };
-          if (campo === 'proximo') {
-            dadosGist.proximaUpdate = valor;
-          } else {
-            alvo[campo] = valor;
-          }
+          if (campo === 'proximo') dadosGist.proximaUpdate = valor;
+          else alvo[campo] = valor;
           dadosGist.updates = updates;
           await salvarGist(dadosGist);
-          return interaction.editReply({
-            content: `✏️ **Decreto atualizado!**\n\`${alvo.versao}\` — ${alvo.titulo}\n\n${campoNomes[campo]}: ${valor}\n\n*O site será atualizado automaticamente.*`,
-          });
+          return interaction.editReply({ content: `✏️ **Decreto atualizado!** \`${alvo.versao}\` — campo \`${campo}\`: ${valor}` });
         }
-
-        // /changelog imagem
         if (sub === 'imagem') {
-          const num    = interaction.options.getInteger('numero');
-          const anexo  = interaction.options.getAttachment('imagem');
-          if (num < 1 || num > updates.length) return interaction.editReply({ content: `⚠️ *Número inválido. Use entre 1 e ${updates.length}.*` });
+          const num   = interaction.options.getInteger('numero');
+          const anexo = interaction.options.getAttachment('imagem');
+          if (num < 1 || num > updates.length) return interaction.editReply({ content: `⚠️ *Número inválido.*` });
           const ehImagem = /\.(png|jpg|jpeg|gif|webp)(\?|$)/i.test(anexo.url);
           if (!ehImagem) return interaction.editReply({ content: '⚠️ *Apenas imagens são aceitas (png, jpg, gif, webp).*' });
           updates[num - 1].imagem = anexo.url;
           dadosGist.updates = updates;
           await salvarGist(dadosGist);
-          return interaction.editReply({
-            content: `🖼️ **Imagem atualizada no decreto #${num}!**\n\`${updates[num-1].versao}\` — ${updates[num-1].titulo}\n\n*A imagem já aparece no site.*`,
-          });
+          return interaction.editReply({ content: `🖼️ **Imagem atualizada no decreto #${num}!**` });
         }
-
-      } catch (err) {
-        console.error('Erro /changelog:', err.message);
-        return interaction.editReply({ content: `⚠️ *Os ventos do Érebo interferiram. Tente novamente.*` });
-      }
+      } catch (err) { console.error('Erro /changelog:', err.message); return interaction.editReply({ content: `⚠️ *Os ventos do Érebo interferiram. Tente novamente.*` }); }
       return;
     }
 
-    // ──────────────────────────────────────────────────────────
-    // ──────────────────────────────────────────────────────────
-    // SISTEMA DE CÓDIGOS DE RESGATE
-    // ──────────────────────────────────────────────────────────
-
-    // /vincular — vínculo Discord ↔ Roblox para uso de códigos
     if (interaction.isChatInputCommand() && interaction.commandName === 'vincular') {
       const robloxUser = interaction.options.getString('usuario');
       await interaction.deferReply({ ephemeral: true });
       try {
         const res  = await fetch(`https://users.roblox.com/v1/users/search?keyword=${encodeURIComponent(robloxUser)}&limit=10`);
         const data = await res.json();
-        if (!data.data || !data.data.length)
-          return interaction.editReply({ content: '⚠️ *Usuário não encontrado no Roblox. Verifique o nome exato.*' });
-
+        if (!data.data || !data.data.length) return interaction.editReply({ content: '⚠️ *Usuário não encontrado no Roblox. Verifique o nome exato.*' });
         const rbUser = data.data[0];
         const db     = await lerVinculos();
-        // Verifica se já existe vínculo com essa conta Roblox
         const jaVinculado = db.vinculos.find(v => v.robloxId === String(rbUser.id));
-        if (jaVinculado && jaVinculado.discordId !== interaction.user.id)
-          return interaction.editReply({ content: `⚠️ *A conta **${rbUser.name}** já está vinculada a outro usuário Discord.*` });
-
-        // Remove vínculo anterior do mesmo Discord
+        if (jaVinculado && jaVinculado.discordId !== interaction.user.id) return interaction.editReply({ content: `⚠️ *A conta **${rbUser.name}** já está vinculada a outro usuário Discord.*` });
         db.vinculos = db.vinculos.filter(v => v.discordId !== interaction.user.id);
         db.vinculos.push({ discordId: interaction.user.id, robloxId: String(rbUser.id), robloxName: rbUser.name, vinculadoEm: new Date().toISOString() });
         await salvarVinculos(db);
         invalidarCache();
-
-        // Cargo verificado
         if (CONFIG.CARGO_VERIFICADO) {
           const cargo = interaction.guild?.roles?.cache?.get(CONFIG.CARGO_VERIFICADO);
           if (cargo) await interaction.member.roles.add(cargo).catch(() => {});
         }
-
         const embed = new EmbedBuilder()
-          .setColor(CONFIG.CORES.SUCESSO)
-          .setTitle('🔗 Conta Vinculada!')
-          .setDescription(`Tua conta Discord foi vinculada ao jogador **${rbUser.name}** no Roblox!
-
-Agora podes resgatar códigos no jogo usando tua conta.`)
+          .setColor(CONFIG.CORES.SUCESSO).setTitle('🔗 Conta Vinculada!')
+          .setDescription(`Tua conta Discord foi vinculada ao jogador **${rbUser.name}** no Roblox!\n\nAgora podes resgatar códigos no jogo usando tua conta.`)
           .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${rbUser.id}&width=420&height=420&format=png`)
-          .addFields(
-            { name: '👤 Roblox', value: rbUser.name, inline: true },
-            { name: '🆔 ID',     value: String(rbUser.id), inline: true },
-          )
-          .setFooter({ text: 'Tower Deep · Vínculo registrado' })
-          .setTimestamp();
+          .addFields({ name: '👤 Roblox', value: rbUser.name, inline: true }, { name: '🆔 ID', value: String(rbUser.id), inline: true })
+          .setFooter({ text: 'Tower Deep · Vínculo registrado' }).setTimestamp();
         return interaction.editReply({ embeds: [embed] });
-      } catch (err) {
-        console.error('Erro /vincular:', err.message);
-        return interaction.editReply({ content: '⚠️ *Erro ao vincular. Tente novamente.*' });
-      }
+      } catch (err) { console.error('Erro /vincular:', err.message); return interaction.editReply({ content: '⚠️ *Erro ao vincular. Tente novamente.*' }); }
     }
 
-    // /gencodigo — gerar código de resgate (Admin)
+    // ── /gencodigo ─────────────────────────────────────────
     if (interaction.isChatInputCommand() && interaction.commandName === 'gencodigo') {
       if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫 *Apenas Admins podem gerar códigos.*', ephemeral: true });
-
       await interaction.deferReply({ ephemeral: true });
-
       try {
         const descricao   = interaction.options.getString('descricao');
         const maxUsos     = interaction.options.getInteger('maxusos') || 0;
         const expiraHoras = interaction.options.getInteger('expira_horas') || 0;
+
         const sessao = {
-          descricao,
-          maxUsos,
-          expiraHoras,
-          recompensas: [],
-          tiposIdx: 0,
-          step: 'tipo',
-          tiposSelecionados: []
+          descricao, maxUsos, expiraHoras,
+          recompensas: [], tiposIdx: 0,
+          tiposSelecionados: [],
         };
-        if (sessoescodigo.has(interaction.user.id)) {
-          const storedSession = sessoescodigo.get(interaction.user.id);
-          sessao.tiposSelecionados = storedSession.tiposSelecionados;
-          sessao.recompensas = storedSession.recompensas;
-        }
         sessoescodigo.set(interaction.user.id, sessao);
         setTimeout(() => sessoescodigo.delete(interaction.user.id), 10 * 60 * 1000);
 
-        const tipos = Object.entries(TIPOS_RECOMPENSA).map(([value, info]) => ({
-          label: info.label,
-          value,
-          emoji: info.emoji,
-          description: info.temLista ? 'Seleciona item do catálogo' : `Define quantidade de ${info.unidade}`,
-        }));
+        // CORREÇÃO: StringSelectMenuOptionBuilder sem emoji (evita erro "emoji inválido")
+        const tipos = Object.entries(TIPOS_RECOMPENSA).map(([value, info]) =>
+          new StringSelectMenuOptionBuilder()
+            .setLabel(info.label.slice(0, 100))
+            .setValue(value)
+            .setDescription(info.temLista ? 'Seleciona item do catálogo' : `Define quantidade de ${info.unidade}`)
+        );
 
         const menuTipo = new ActionRowBuilder().addComponents(
           new StringSelectMenuBuilder()
             .setCustomId(`gc_tipo_${interaction.user.id}`)
             .setPlaceholder('🎁 Que tipos de recompensa este código vai dar?')
             .setMinValues(1)
-            .setMaxValues(Math.min(tipos.length, 8))
-            .addOptions(tipos.slice(0, 25))
+            .setMaxValues(Math.min(Object.keys(TIPOS_RECOMPENSA).length, 8))
+            .addOptions(tipos)
         );
 
         const embed = new EmbedBuilder()
@@ -2141,7 +1778,7 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
         return interaction.editReply({ embeds: [embed], components: [menuTipo] });
       } catch (err) {
         console.error('Erro /gencodigo:', err);
-        return interaction.editReply({ content: '⚠️ Ocorreu um erro ao iniciar o /gencodigo. Veja os logs do bot.' });
+        return interaction.editReply({ content: `⚠️ Erro ao iniciar /gencodigo: ${err.message}` });
       }
     }
 
@@ -2166,14 +1803,16 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
       const categoria = interaction.values[0].replace('cat:', '');
       const catalogo  = await getCatalogoCompleto();
       const itensCat  = catalogo.filter(i => i.categoria === categoria).slice(0, 25);
-      if (!itensCat.length) {
-        return interaction.reply({ content: '⚠️ Nenhum item encontrado nesta categoria.', ephemeral: true });
-      }
-      const opsItens  = itensCat.map(i => ({
-        label: i.nome.slice(0, 100), value: i.id,
-        description: `${i.raridade} · ${i.id}`,
-        emoji: RARIDADE_EMOJI[i.raridade] || '🎁',
-      }));
+      if (!itensCat.length) return interaction.reply({ content: '⚠️ Nenhum item encontrado nesta categoria.', ephemeral: true });
+
+      // CORREÇÃO: StringSelectMenuOptionBuilder sem emoji
+      const opsItens = itensCat.map(i =>
+        new StringSelectMenuOptionBuilder()
+          .setLabel(i.nome.slice(0, 100))
+          .setValue(i.id)
+          .setDescription(`${i.raridade} · ${i.id}`.slice(0, 100))
+      );
+
       const menuItem = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
           .setCustomId(`gc_item_${adminId}`)
@@ -2196,7 +1835,6 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('gc_item_')) {
       const adminId = interaction.customId.split('gc_item_')[1];
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
-
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
       const catalogo = await getCatalogoCompleto();
@@ -2239,7 +1877,7 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
       const tipo  = sessao.tiposSelecionados[sessao.tiposIdx];
       const info  = TIPOS_RECOMPENSA[tipo];
       const valor = parseInt(interaction.fields.getTextInputValue('valor')) || 0;
-      sessao.recompensas.push({ tipo, valor, quantidade: valor, label: `${info.emoji} ${info.label}: ${valor} ${info.unidade}` });
+      sessao.recompensas.push({ tipo, valor, quantidade: valor, label: `${info.label}: ${valor} ${info.unidade}` });
       sessao.tiposIdx++;
       return await avancarRecompensa(interaction, sessao, adminId);
     }
@@ -2252,9 +1890,15 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
       const catalogo   = await getCatalogoCompleto();
       const categorias = [...new Set(catalogo.map(i => i.categoria))].sort();
-      const opsCat = categorias.slice(0, 25).map(c => ({
-        label: c, value: `cat:${c}`, description: `${catalogo.filter(i => i.categoria === c).length} itens`,
-      }));
+
+      // CORREÇÃO: StringSelectMenuOptionBuilder sem emoji
+      const opsCat = categorias.slice(0, 25).map(c =>
+        new StringSelectMenuOptionBuilder()
+          .setLabel(c.slice(0, 100))
+          .setValue(`cat:${c}`)
+          .setDescription(`${catalogo.filter(i => i.categoria === c).length} itens`)
+      );
+
       return interaction.update({
         embeds: [new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA).setTitle('📂 Categorias').setDescription('*Selecione a categoria:*')],
         components: [new ActionRowBuilder().addComponents(
@@ -2263,34 +1907,20 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
       });
     }
 
-    // /itemcadastrar — Admin cadastra item novo no catálogo
+    // /itemcadastrar
     if (interaction.isChatInputCommand() && interaction.commandName === 'itemcadastrar') {
       if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫 Apenas Admins.', ephemeral: true });
       const modal = new ModalBuilder()
-        .setCustomId('itemcadastrar_modal')
-        .setTitle('Cadastrar Novo Item')
+        .setCustomId('itemcadastrar_modal').setTitle('Cadastrar Novo Item')
         .addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('id').setLabel('ID do item (sem espaços, ex: espada_zeus)')
-              .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('espada_zeus')
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('nome').setLabel('Nome de exibição')
-              .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Espada de Zeus')
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('raridade').setLabel('Raridade')
-              .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Comum / Incomum / Raro / Epico / Lendario / Primordial')
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('categoria').setLabel('Categoria (ex: Arma, Especial, Skin...)')
-              .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Arma'  )
-          )
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('id').setLabel('ID do item (sem espaços, ex: espada_zeus)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('espada_zeus')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nome').setLabel('Nome de exibição').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Espada de Zeus')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('raridade').setLabel('Raridade').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Comum / Incomum / Raro / Epico / Lendario / Primordial')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('categoria').setLabel('Categoria (ex: Arma, Especial, Skin...)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Arma'))
         );
       return interaction.showModal(modal);
     }
 
-    // Modal — confirmar cadastro de item
     if (interaction.isModalSubmit() && interaction.customId === 'itemcadastrar_modal') {
       if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫', ephemeral: true });
       await interaction.deferReply({ ephemeral: true });
@@ -2298,35 +1928,22 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
       const nome      = interaction.fields.getTextInputValue('nome').trim();
       const raridade  = interaction.fields.getTextInputValue('raridade').trim();
       const categoria = interaction.fields.getTextInputValue('categoria').trim();
-
-      // Validar id único
       const catalogo = await getCatalogoCompleto();
-      if (catalogo.find(i => i.id === id)) {
-        return interaction.editReply({ content: `❌ Já existe um item com o ID \`${id}\`. Use outro ID.` });
-      }
-
+      if (catalogo.find(i => i.id === id)) return interaction.editReply({ content: `❌ Já existe um item com o ID \`${id}\`. Use outro ID.` });
       const novoItem = { id, nome, raridade, categoria, adicionadoPor: interaction.user.tag, adicionadoEm: new Date().toISOString() };
       const db = await lerCodigos();
       if (!db.itensExtras) db.itensExtras = [];
       db.itensExtras.push(novoItem);
       await salvarCodigos(db);
       invalidarCache();
-
       const emoji = RARIDADE_EMOJI[raridade] || '🎁';
       return interaction.editReply({
-        embeds: [new EmbedBuilder()
-          .setColor(CONFIG.CORES.SUCESSO)
-          .setTitle('✅ Item Cadastrado!')
+        embeds: [new EmbedBuilder().setColor(CONFIG.CORES.SUCESSO).setTitle('✅ Item Cadastrado!')
           .setDescription(`${emoji} **${nome}** foi adicionado ao catálogo e já aparece no /gencodigo.`)
-          .addFields(
-            { name: 'ID',        value: `\`${id}\``, inline: true },
-            { name: 'Raridade',  value: raridade,    inline: true },
-            { name: 'Categoria', value: categoria,   inline: true },
-          )],
+          .addFields({ name: 'ID', value: `\`${id}\``, inline: true }, { name: 'Raridade', value: raridade, inline: true }, { name: 'Categoria', value: categoria, inline: true })],
       });
     }
 
-    // /itemlistar — listar itens do catálogo (Admin)
     if (interaction.isChatInputCommand() && interaction.commandName === 'itemlistar') {
       if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫 Apenas Admins.', ephemeral: true });
       await interaction.deferReply({ ephemeral: true });
@@ -2339,8 +1956,7 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
         return `**${c}** — ${count} iten${count !== 1 ? 's' : ''}`;
       }).join('\n');
       return interaction.editReply({
-        embeds: [new EmbedBuilder()
-          .setColor(CONFIG.CORES.INFO)
+        embeds: [new EmbedBuilder().setColor(CONFIG.CORES.INFO)
           .setTitle(`📦 Catálogo de Itens — ${catalogo.length} itens`)
           .setDescription(resumo)
           .addFields({ name: '➕ Itens extras cadastrados', value: extras.length ? `${extras.length} iten${extras.length !== 1 ? 's' : ''} adicionados por admins` : 'Nenhum ainda. Use /itemcadastrar.' })
@@ -2348,21 +1964,15 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
       });
     }
 
-    // Botão — info de vincular
     if (interaction.isButton() && interaction.customId === 'btn_vincular_info') {
-      return interaction.reply({
-        content: '🔗 *Para vincular tua conta Roblox, usa o comando `/vincular` e coloca o teu nome de usuário no Roblox!*',
-        ephemeral: true,
-      });
+      return interaction.reply({ content: '🔗 *Para vincular tua conta Roblox, usa o comando `/vincular` e coloca o teu nome de usuário no Roblox!*', ephemeral: true });
     }
 
-    // /codigo listar / desativar / info (Admin)
     if (interaction.isChatInputCommand() && interaction.commandName === 'codigo') {
       if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫 *Apenas Admins.*', ephemeral: true });
       await interaction.deferReply({ ephemeral: true });
       const sub = interaction.options.getSubcommand();
       const db  = await lerCodigos();
-
       if (sub === 'listar') {
         if (!db.codigos.length) return interaction.editReply({ content: '📜 *Nenhum código criado ainda.*' });
         const lista = db.codigos.slice(-20).reverse().map(c => {
@@ -2370,11 +1980,8 @@ Agora podes resgatar códigos no jogo usando tua conta.`)
           const usos   = `${c.usadoPor?.length || 0}${c.maxUsos ? '/'+c.maxUsos : ''}`;
           return `${status} \`${c.id}\` — ${c.descricao} *(${usos} usos)*`;
         }).join('\n');
-
-        return interaction.editReply({ content: `📋 **Códigos (últimos 20):**
-${lista}` });
+        return interaction.editReply({ content: `📋 **Códigos (últimos 20):**\n${lista}` });
       }
-
       if (sub === 'desativar') {
         const id = interaction.options.getString('codigo').toUpperCase();
         const c  = db.codigos.find(x => x.id === id);
@@ -2384,7 +1991,6 @@ ${lista}` });
         invalidarCache();
         return interaction.editReply({ content: `🚫 Código \`${id}\` desativado com sucesso.` });
       }
-
       if (sub === 'info') {
         const id = interaction.options.getString('codigo').toUpperCase();
         const c  = db.codigos.find(x => x.id === id);
@@ -2395,22 +2001,18 @@ ${lista}` });
           .addFields(
             { name: '📝 Descrição',   value: c.descricao,                                                          inline: true  },
             { name: '🟢 Ativo',       value: c.ativo ? 'Sim' : 'Não',                                              inline: true  },
-            { name: '👥 Usos',        value: `${c.usadoPor?.length||0}${c.maxUsos?'/'+c.maxUsos:''}`,               inline: true  },
+            { name: '👥 Usos',        value: `${c.usadoPor?.length||0}${c.maxUsos?'/'+c.maxUsos:''}`,              inline: true  },
             { name: '📅 Criado em',   value: new Date(c.criadoEm).toLocaleDateString('pt-BR'),                     inline: true  },
             { name: '⏰ Expira',       value: c.expira ? new Date(c.expira).toLocaleDateString('pt-BR') : 'Nunca', inline: true  },
             { name: '🎀 Recompensas', value: c.recompensas.map(r => r.label).join('\n') || 'Nenhuma',              inline: false },
-
           );
         if (c.usadoPor?.length) {
-          embed.addFields({ name: `👤 Usadopor (${c.usadoPor.length})`, value: c.usadoPor.slice(-10).map(u => `• ${u.robloxName} (${new Date(u.usadoEm).toLocaleDateString('pt-BR')})`).join('\n') });
-
+          embed.addFields({ name: `👤 Usado por (${c.usadoPor.length})`, value: c.usadoPor.slice(-10).map(u => `• ${u.robloxName} (${new Date(u.usadoEm).toLocaleDateString('pt-BR')})`).join('\n') });
         }
         return interaction.editReply({ embeds: [embed] });
       }
     }
 
-    // /verificar — vincular conta do Roblox (legado)
-    // ──────────────────────────────────────────────────────────
     if (interaction.isChatInputCommand() && interaction.commandName === 'verificar') {
       const robloxUser = interaction.options.getString('usuario');
       await interaction.deferReply({ ephemeral: true });
@@ -2419,81 +2021,54 @@ ${lista}` });
         const data = await res.json();
         if (data.data && data.data.length > 0) {
           const rbUser = data.data[0];
-          // Dá o cargo de verificado se configurado
           if (CONFIG.CARGO_VERIFICADO) {
             const cargo = interaction.guild.roles.cache.get(CONFIG.CARGO_VERIFICADO);
             if (cargo) await interaction.member.roles.add(cargo);
           }
           const embed = new EmbedBuilder()
-            .setColor(CONFIG.CORES.SUCESSO)
-            .setTitle('✅ Conta Vinculada com Sucesso!')
+            .setColor(CONFIG.CORES.SUCESSO).setTitle('✅ Conta Vinculada com Sucesso!')
             .setDescription(`Tua alma no Discord foi atrelada ao mortal **${rbUser.name}** no Roblox.\nVocê recebeu as bênçãos de verificado.`)
             .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${rbUser.id}&width=420&height=420&format=png`);
           return interaction.editReply({ embeds: [embed] });
         } else {
           return interaction.editReply({ content: '⚠️ *Os oráculos não encontraram esse mortal no Roblox. Verifique o nome e tente novamente.*' });
         }
-      } catch (err) {
-        console.error('Erro /verificar:', err.message);
-        return interaction.editReply({ content: '⚠️ *Houve uma perturbação no portal para o Roblox. Tente novamente mais tarde.*' });
-      }
+      } catch (err) { console.error('Erro /verificar:', err.message); return interaction.editReply({ content: '⚠️ *Houve uma perturbação no portal para o Roblox. Tente novamente mais tarde.*' }); }
     }
 
-    // ──────────────────────────────────────────────────────────
-    // Menu suspenso de ajuda
-    // ──────────────────────────────────────────────────────────
     if (interaction.isStringSelectMenu() && interaction.customId === 'menu_ajuda') {
       const escolha = interaction.values[0];
       const embed   = new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA);
-
       if (escolha === 'mortais') {
-        embed.setTitle('👥 Poderes dos Mortais')
-          .setDescription('🐛 `/bug` — Relatar uma anomalia\n💡 `/sugestao` — Enviar visão ao Olimpo\n🏆 `/rank` — Ver teu título divino\n✅ `/verificar` — Vincular conta do Roblox\n🎫 Menu de tickets — Abrir chamado de suporte');
+        embed.setTitle('👥 Poderes dos Mortais').setDescription('🐛 `/bug` — Relatar uma anomalia\n💡 `/sugestao` — Enviar visão ao Olimpo\n🏆 `/rank` — Ver teu título divino\n✅ `/verificar` — Vincular conta do Roblox\n🎫 Menu de tickets — Abrir chamado de suporte');
       } else if (escolha === 'oraculo') {
-        embed.setTitle('✨ O Oráculo')
-          .setDescription('Mencione o bot em qualquer canal:\n`@Bot qual torre é melhor?` — Consulta geral\n`@Bot tenho um bug` — Auxílio técnico\n`@Bot sugestão: torre X` — Análise de ideia');
+        embed.setTitle('✨ O Oráculo').setDescription('Mencione o bot em qualquer canal:\n`@Bot qual torre é melhor?` — Consulta geral\n`@Bot tenho um bug` — Auxílio técnico\n`@Bot sugestão: torre X` — Análise de ideia');
       } else if (escolha === 'equipe') {
         if (!ehEquipe(interaction.member)) return interaction.reply({ content: '🚫 *Os deuses proíbem teu acesso a esta sabedoria.*', ephemeral: true });
-        embed.setTitle('🛡️ Armamento da Equipe & Mods')
-          .setDescription('🔑 `!token` — Gerar token do site\n📜 `!update` — Ritual de novo decreto\n📋 `!listar` — Consultar os anais\n🗳️ `/enquete` — Criar enquete no site\n🧹 `/limpar` — Apagar mensagens\n📢 `/anunciar` — Fazer anúncio\n🎫 Comandos `/ticket`...');
+        embed.setTitle('🛡️ Armamento da Equipe & Mods').setDescription('🔑 `!token` — Gerar token do site\n📜 `!update` — Ritual de novo decreto\n📋 `!listar` — Consultar os anais\n🗳️ `/enquete` — Criar enquete no site\n🧹 `/limpar` — Apagar mensagens\n📢 `/anunciar` — Fazer anúncio\n🎫 Comandos `/ticket`...');
       } else if (escolha === 'admin') {
         if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫 *Os deuses proíbem teu acesso a esta sabedoria.*', ephemeral: true });
-        embed.setTitle('🔱 Grimório dos Admins')
-          .setDescription('✏️ `!editar / !apagar` — Gerenciar decretos\n📜 `/changelog` — Gerenciar decretos via slash\n🗺️ `/roadmap` — Gerenciar roadmap do site\n🚫 `!revogar` — Gerenciar tokens ativos');
+        embed.setTitle('🔱 Grimório dos Admins').setDescription('✏️ `!editar / !apagar` — Gerenciar decretos\n📜 `/changelog` — Gerenciar decretos via slash\n🗺️ `/roadmap` — Gerenciar roadmap do site\n🚫 `!revogar` — Gerenciar tokens ativos');
       }
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
-    // ──────────────────────────────────────────────────────────
-    // SISTEMA DE TICKETS
-    // ──────────────────────────────────────────────────────────
-
-    // Select menu — abrir ticket
     if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_criar') {
       const categoria = interaction.values[0];
       return abrirTicket(interaction, categoria);
     }
 
-    // /ticket
     if (interaction.isChatInputCommand() && interaction.commandName === 'ticket') {
       const sub = interaction.options.getSubcommand();
-
-      // /ticket painel — envia painel no canal (apenas staff)
       if (sub === 'painel') {
-        if (!temPermissaoModeracao(interaction)) {
-          return interaction.reply({ content: '⚠️ *Apenas guardiões do Olimpo podem invocar o painel de tickets.*', ephemeral: true });
-        }
+        if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas guardiões do Olimpo podem invocar o painel de tickets.*', ephemeral: true });
         await enviarPainelTicket(interaction.channel);
         return interaction.reply({ content: '✅ *Painel de tickets proclamado no canal!*', ephemeral: true });
       }
-
-      // /ticket listar — lista tickets abertos
       if (sub === 'listar') {
-        if (!temPermissaoModeracao(interaction)) {
-          return interaction.reply({ content: '⚠️ *Apenas guardiões do Olimpo podem ver esta lista.*', ephemeral: true });
-        }
+        if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas guardiões do Olimpo podem ver esta lista.*', ephemeral: true });
         const lista = [...ticketsAtivos.values()].filter(t => t.status === 'aberto');
-        if (!lista.length) return interaction.reply({ content: '✅ *Nenhum ticket aberto no momento. Os salões do Olimpo estão em paz.*', ephemeral: true });
+        if (!lista.length) return interaction.reply({ content: '✅ *Nenhum ticket aberto no momento.*', ephemeral: true });
         const texto = lista.map(t => {
           const canalRef = interaction.guild.channels.cache.get(t.channelId);
           const cat = CATEGORIAS_TICKET[t.categoria]?.emoji || '📜';
@@ -2501,63 +2076,39 @@ ${lista}` });
           const tempo = mins < 60 ? `${mins}min` : `${Math.floor(mins/60)}h${mins%60}min`;
           return `${cat} **#${t.id}** — ${t.username} — ${t.categoria} — aberto há ${tempo} ${canalRef ? `→ ${canalRef}` : ''}`;
         }).join('\n');
-        return interaction.reply({
-          content: `📜 **TICKETS ABERTOS — ${lista.length} chamado(s)**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${texto}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-          ephemeral: true,
-        });
+        return interaction.reply({ content: `📜 **TICKETS ABERTOS — ${lista.length} chamado(s)**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${texto}`, ephemeral: true });
       }
-
-      // Comandos que exigem estar dentro de um canal de ticket
       const ticket = ticketsAtivos.get(interaction.channelId);
-      if (!ticket) {
-        return interaction.reply({ content: '⚠️ *Este comando só funciona dentro de um canal de ticket.*', ephemeral: true });
-      }
-
-      // /ticket fechar
+      if (!ticket) return interaction.reply({ content: '⚠️ *Este comando só funciona dentro de um canal de ticket.*', ephemeral: true });
       if (sub === 'fechar') {
-        const ehDono    = ticket.userId === interaction.user.id;
-        const ehStaff   = temPermissaoModeracao(interaction);
+        const ehDono  = ticket.userId === interaction.user.id;
+        const ehStaff = temPermissaoModeracao(interaction);
         if (!ehDono && !ehStaff) return interaction.reply({ content: '⚠️ *Apenas o criador do ticket ou staff pode fechá-lo.*', ephemeral: true });
         return fecharTicket(interaction, ticket);
       }
-
-      // /ticket resolver
       if (sub === 'resolver') {
         if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas staff pode marcar como resolvido.*', ephemeral: true });
-        ticket.status      = 'resolvido';
-        ticket.resolvidoPor = interaction.user.tag;
+        ticket.status = 'resolvido'; ticket.resolvidoPor = interaction.user.tag;
         await salvarTickets().catch(() => {});
-        const embedResolvido = new EmbedBuilder()
-          .setColor(0x3dd68c)
-          .setTitle(`✅ Ticket #${ticket.id} Resolvido`)
-          .setDescription(`*Os deuses declararam este chamado solucionado.*\n\n**Resolvido por:** ${interaction.user.tag}\n\nO ticket será fechado em breve.\n*Usa \`/ticket fechar\` para encerrar ou aguarda o criador confirmar.*`);
+        const embedResolvido = new EmbedBuilder().setColor(0x3dd68c).setTitle(`✅ Ticket #${ticket.id} Resolvido`)
+          .setDescription(`*Os deuses declararam este chamado solucionado.*\n\n**Resolvido por:** ${interaction.user.tag}\n\nO ticket será fechado em breve.`);
         await interaction.reply({ embeds: [embedResolvido] });
         await logTicket(interaction.guild, `✅ **Ticket Resolvido** — #${ticket.id}\n👤 **Usuário:** ${ticket.username}\n✅ **Resolvido por:** ${interaction.user.tag}`);
         return;
       }
-
-      // /ticket assumir
       if (sub === 'assumir') {
         if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas staff pode assumir um ticket.*', ephemeral: true });
         ticket.assumidoPor = interaction.user.tag;
         await salvarTickets().catch(() => {});
-        await interaction.reply({
-          content: `⚔️ **${interaction.user} assumiu o atendimento deste ticket.**\n*${interaction.user.username} é o guardião responsável por este chamado.*`,
-        });
+        await interaction.reply({ content: `⚔️ **${interaction.user} assumiu o atendimento deste ticket.**` });
         return;
       }
-
-      // /ticket add
       if (sub === 'add') {
         if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas staff pode adicionar usuários ao ticket.*', ephemeral: true });
         const usuario = interaction.options.getUser('usuario');
-        await interaction.channel.permissionOverwrites.edit(usuario.id, {
-          ViewChannel: true, SendMessages: true, ReadMessageHistory: true,
-        });
+        await interaction.channel.permissionOverwrites.edit(usuario.id, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
         return interaction.reply({ content: `✅ *${usuario} foi adicionado à câmara.*` });
       }
-
-      // /ticket remove
       if (sub === 'remove') {
         if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas staff pode remover usuários do ticket.*', ephemeral: true });
         const usuario = interaction.options.getUser('usuario');
@@ -2567,7 +2118,6 @@ ${lista}` });
       }
     }
 
-    // Botão — fechar ticket
     if (interaction.isButton() && interaction.customId === 'ticket_fechar') {
       const ticket = ticketsAtivos.get(interaction.channelId);
       if (!ticket) return interaction.reply({ content: '⚠️ *Ticket não encontrado.*', ephemeral: true });
@@ -2577,76 +2127,50 @@ ${lista}` });
       return fecharTicket(interaction, ticket);
     }
 
-    // Botão — resolver ticket
     if (interaction.isButton() && interaction.customId === 'ticket_resolver') {
       const ticket = ticketsAtivos.get(interaction.channelId);
       if (!ticket) return interaction.reply({ content: '⚠️ *Ticket não encontrado.*', ephemeral: true });
       if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas staff pode marcar como resolvido.*', ephemeral: true });
-      ticket.status       = 'resolvido';
-      ticket.resolvidoPor = interaction.user.tag;
+      ticket.status = 'resolvido'; ticket.resolvidoPor = interaction.user.tag;
       await salvarTickets().catch(() => {});
-      const embedResolvido = new EmbedBuilder()
-        .setColor(0x3dd68c)
-        .setTitle(`✅ Ticket #${ticket.id} Resolvido`)
-        .setDescription(`*Os deuses declararam este chamado solucionado.*\n\n**Resolvido por:** ${interaction.user.tag}\n\n*Usa \`/ticket fechar\` ou o botão 🔒 para encerrar o ticket.*`);
+      const embedResolvido = new EmbedBuilder().setColor(0x3dd68c).setTitle(`✅ Ticket #${ticket.id} Resolvido`)
+        .setDescription(`*Os deuses declararam este chamado solucionado.*\n\n**Resolvido por:** ${interaction.user.tag}`);
       await interaction.reply({ embeds: [embedResolvido] });
       await logTicket(interaction.guild, `✅ **Ticket Resolvido** — #${ticket.id}\n👤 **Usuário:** ${ticket.username}\n✅ **Resolvido por:** ${interaction.user.tag}`);
       return;
     }
 
-    // Botão — assumir ticket
     if (interaction.isButton() && interaction.customId === 'ticket_assumir') {
       const ticket = ticketsAtivos.get(interaction.channelId);
       if (!ticket) return interaction.reply({ content: '⚠️ *Ticket não encontrado.*', ephemeral: true });
       if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas staff pode assumir um ticket.*', ephemeral: true });
       ticket.assumidoPor = interaction.user.tag;
       await salvarTickets().catch(() => {});
-      await interaction.reply({
-        content: `⚔️ **${interaction.user} assumiu o atendimento deste ticket.**\n*${interaction.user.username} é o guardião responsável por este chamado.*`,
-      });
+      await interaction.reply({ content: `⚔️ **${interaction.user} assumiu o atendimento deste ticket.**` });
       return;
     }
 
-    // Botão — avaliação (chega via DM)
     if (interaction.isButton() && interaction.customId.startsWith('avaliar_')) {
-      const partes  = interaction.customId.split('_'); // avaliar_NOTA_TICKETID
-      const nota    = parseInt(partes[1]);
+      const partes   = interaction.customId.split('_');
+      const nota     = parseInt(partes[1]);
       const ticketId = parseInt(partes[2]);
-
       const estrelas = '⭐'.repeat(nota);
       const msgs     = ['', '😔 Lamentamos não ter ajudado bem...', '😐 Obrigado pelo retorno, melhoraremos!', '🙂 Que bom que ajudamos!', '😊 Fico feliz que tenha gostado!', '🌟 Os deuses do Olimpo agradecem, mortal!'];
-
-      await interaction.reply({
-        content: `${estrelas} *Avaliação registrada! ${msgs[nota]}*\n*Obrigado por jogar Tower Deep!* 🔱`,
-        ephemeral: false,
-      });
-
-      // Desativa os botões de avaliação
+      await interaction.reply({ content: `${estrelas} *Avaliação registrada! ${msgs[nota]}*\n*Obrigado por jogar Tower Deep!* 🔱`, ephemeral: false });
       const rowDesativada = new ActionRowBuilder().addComponents(
-        [1,2,3,4,5].map(n =>
-          new ButtonBuilder()
-            .setCustomId(`avaliar_${n}_${ticketId}_done`)
-            .setLabel('⭐'.repeat(n))
-            .setStyle(n === nota ? ButtonStyle.Primary : ButtonStyle.Secondary)
-            .setDisabled(true)
-        )
+        [1,2,3,4,5].map(n => new ButtonBuilder().setCustomId(`avaliar_${n}_${ticketId}_done`).setLabel('⭐'.repeat(n)).setStyle(n === nota ? ButtonStyle.Primary : ButtonStyle.Secondary).setDisabled(true))
       );
       await interaction.message.edit({ components: [rowDesativada] }).catch(() => {});
-
-      // Log da avaliação
       if (CONFIG.CANAL_LOG_TICKETS) {
         try {
-          const guilds = client.guilds.cache.values();
-          for (const g of guilds) {
+          for (const g of client.guilds.cache.values()) {
             const canalLog = g.channels.cache.get(CONFIG.CANAL_LOG_TICKETS);
             if (canalLog) {
-              await canalLog.send(
-                `⭐ **Avaliação Recebida** — Ticket #${ticketId}\n👤 **Usuário:** ${interaction.user.tag}\n${estrelas} **Nota:** ${nota}/5\n${msgs[nota]}`
-              );
+              await canalLog.send(`⭐ **Avaliação Recebida** — Ticket #${ticketId}\n👤 **Usuário:** ${interaction.user.tag}\n${estrelas} **Nota:** ${nota}/5\n${msgs[nota]}`);
               break;
             }
           }
-        } catch { /* silencioso */ }
+        } catch {}
       }
       return;
     }
@@ -2672,7 +2196,7 @@ client.once('ready', async () => {
   console.log(`📜 Canal updates:   ${CONFIG.CANAL_UPDATE_ID  || '❌ não configurado'}`);
   console.log(`📢 Canal anúncios:  ${CONFIG.CANAL_ANUNCIO_ID || '❌ não configurado'}`);
   console.log(`🐛 Canal bugs:      ${CONFIG.CANAL_BUGS_ID    || '❌ não configurado'}`);
-  console.log(`🎫 Categoria tickets: ${CONFIG.CATEGORIA_TICKETS || '❌ não configurado (tickets criados na raiz)'}`);
+  console.log(`🎫 Categoria tickets: ${CONFIG.CATEGORIA_TICKETS || '❌ não configurado'}`);
   console.log(`📋 Log de tickets:  ${CONFIG.CANAL_LOG_TICKETS || '❌ não configurado'}`);
   console.log(`🔑 Token cargos:    Dono=${CONFIG.CARGO_DONO ? '✅' : '❌'} Admin=${CONFIG.CARGO_ADMIN ? '✅' : '❌'} Mod=${CONFIG.CARGO_MOD ? '✅' : '❌'} Equipe=${CONFIG.CARGO_EQUIPE ? '✅' : '❌'}\n`);
 });
@@ -2681,7 +2205,6 @@ client.once('ready', async () => {
 // BOAS-VINDAS
 // ─────────────────────────────────────────────────────────────
 client.on('guildMemberAdd', async (member) => {
-  // ── Cargo automático (Gamerule) ──────────────────────────
   try {
     const cargo = member.guild.roles.cache.get(CONFIG.CARGO_MEMBRO);
     if (cargo) {
@@ -2690,11 +2213,8 @@ client.on('guildMemberAdd', async (member) => {
     } else {
       console.warn(`⚠️ Cargo CARGO_MEMBRO (${CONFIG.CARGO_MEMBRO}) não encontrado no servidor.`);
     }
-  } catch (err) {
-    console.error(`❌ Erro ao atribuir cargo a ${member.user.tag}:`, err.message);
-  }
+  } catch (err) { console.error(`❌ Erro ao atribuir cargo a ${member.user.tag}:`, err.message); }
 
-  // ── DM de boas-vindas ────────────────────────────────────
   try {
     const dm      = await member.createDM();
     const botName = member.guild.members.me?.user.username || 'Bot';
@@ -2727,7 +2247,6 @@ client.on('messageCreate', async (message) => {
   const ehComando   = texto.startsWith('!');
   const t           = texto.toLowerCase();
 
-  // IA por menção
   if (mencionouBot) {
     if (!CONFIG.GROK_KEY) return message.reply('🌑 *O Oráculo mergulhou em sono profundo... Configure a variável `GROK_KEY` no Railway para invocá-lo.*');
     const pergunta = texto.replace(/<@!?\d+>/g, '').trim();
@@ -2735,13 +2254,9 @@ client.on('messageCreate', async (message) => {
     return responderComIA(message, pergunta);
   }
 
-  // !token — qualquer canal
   if (texto === '!token') return handleToken(message);
-
-  // !revogar — Dono/Admin
   if (texto.startsWith('!revogar')) return handleRevogar(message, texto.split(' ').slice(1));
 
-  // Canal de updates — comandos restritos por cargo
   if (message.channelId === CONFIG.CANAL_UPDATE_ID) {
     const member = await getMember(message);
 
@@ -2754,7 +2269,7 @@ client.on('messageCreate', async (message) => {
       if (!ehEquipe(member)) return message.reply('🚫 *Apenas membros da Equipe ou superior podem consultar os anais.*');
       try {
         const dados = await lerGist();
-        if (!dados.updates?.length) return message.reply('📜 *Os pergaminhos estão em branco, mortal. Nenhum decreto foi proclamado ainda.*');
+        if (!dados.updates?.length) return message.reply('📜 *Os pergaminhos estão em branco, mortal.*');
         return responderTextoLongo(message, '📜 **ANAIS DO OLIMPO — Decretos Proclamados**\n━━━━━━━━━━━━━━━━━━━━━━━━━\n' + dados.updates.map((u, i) => `**#${i+1}** ⚔️ \`${u.versao}\` — ${u.titulo} *(${u.data})* ${u.imagem ? '🖼️' : ''}`).join('\n'), true);
       } catch { return message.reply('⚠️ *As brumas do Érebo ocultam os pergaminhos... Tente novamente.*'); }
     }
@@ -2762,7 +2277,7 @@ client.on('messageCreate', async (message) => {
     if (texto.startsWith('!apagar')) {
       if (!ehAdmin(member)) return message.reply('🚫 *Apenas Admin ou Dono pode apagar decretos.*');
       const num = parseInt(texto.split(' ')[1]);
-      if (isNaN(num)) return message.reply('⚠️ *Uso: `!apagar 2` — informe o número do decreto (veja com `!listar`).*');
+      if (isNaN(num)) return message.reply('⚠️ *Uso: `!apagar 2` — informe o número do decreto.*');
       try {
         const dados = await lerGist();
         const updates = dados.updates || [];
@@ -2770,7 +2285,7 @@ client.on('messageCreate', async (message) => {
         const removido = updates.splice(num - 1, 1)[0];
         dados.updates = updates;
         await salvarGist(dados);
-        return message.reply(`🗑️ **Decreto apagado:** \`${removido.versao}\` — ${removido.titulo}\n*O site foi atualizado.*`);
+        return message.reply(`🗑️ **Decreto apagado:** \`${removido.versao}\` — ${removido.titulo}`);
       } catch { return message.reply('⚠️ *Erro ao apagar. Tente novamente.*'); }
     }
 
@@ -2781,8 +2296,7 @@ client.on('messageCreate', async (message) => {
       const campo  = partes[2]?.toLowerCase();
       const valor  = partes.slice(3).join(' ');
       const camposValidos = ['titulo', 'subtitulo', 'imagem', 'proximo'];
-      if (isNaN(num) || !campo || !valor)
-        return message.reply('⚠️ *Uso: `!editar 1 titulo Novo Título`*\n*Campos: `titulo`, `subtitulo`, `imagem` (URL), `proximo`*');
+      if (isNaN(num) || !campo || !valor) return message.reply('⚠️ *Uso: `!editar 1 titulo Novo Título`*');
       if (!camposValidos.includes(campo)) return message.reply(`⚠️ *Campo inválido. Use: ${camposValidos.join(', ')}*`);
       try {
         const dados = await lerGist();
@@ -2792,120 +2306,39 @@ client.on('messageCreate', async (message) => {
         else updates[num - 1][campo] = valor;
         dados.updates = updates;
         await salvarGist(dados);
-        return message.reply(`✏️ **Decreto #${num} atualizado!**\nCampo \`${campo}\` → ${valor}\n*O site foi atualizado.*`);
+        return message.reply(`✏️ **Decreto #${num} atualizado!** Campo \`${campo}\` → ${valor}`);
       } catch { return message.reply('⚠️ *Erro ao editar. Tente novamente.*'); }
     }
 
     if (texto === '!ajuda') {
-      // Monta ajuda dinâmica de acordo com o cargo do usuário
       const member = await getMember(message);
       const isDono   = ehDono(member);
       const isAdmin  = ehAdmin(member);
       const isMod    = ehMod(member);
       const isEquipe = ehEquipe(member);
-      const isTodos  = true;
 
       let msg = '🔱 **GRIMÓRIO DO OLIMPO — Poderes Disponíveis**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
-
-      // Todos os mortais
-      msg += '👥 **Para todos os mortais**\n';
-      msg += '🐛 `/bug`                  — Relatar uma anomalia\n';
-      msg += '💡 `/sugestao`             — Enviar uma visão ao Olimpo\n';
-      msg += '🏆 `/rank`                 — Ver teu título divino\n';
-      msg += '🎫 Menu de tickets         — Abrir chamado de suporte\n';
-      msg += '\n';
-
-      // Equipe+
-      if (isEquipe) {
-        msg += '🛡️ **Equipe** *(e superiores)*\n';
-        msg += '🔑 `!token`               — Gerar token de acesso ao site\n';
-        msg += '📋 `!listar`              — Consultar os anais do changelog\n';
-        msg += '🎫 `/ticket listar`       — Ver tickets abertos\n';
-        msg += '🎫 `/ticket assumir`      — Assumir atendimento de ticket\n';
-        msg += '\n';
-      }
-
-      // Mod+
-      if (isMod) {
-        msg += '⚔️ **Moderadores** *(e superiores)*\n';
-        msg += '📜 `!update`              — Ritual de novo decreto\n';
-        msg += '🗳️ `/enquete`             — Criar enquete no site\n';
-        msg += '🧹 `/limpar`              — Apagar mensagens do canal\n';
-        msg += '📢 `/anunciar`            — Fazer anúncio no canal\n';
-        msg += '🎫 `/ticket painel`       — Enviar painel de tickets\n';
-        msg += '🎫 `/ticket fechar`       — Fechar ticket\n';
-        msg += '🎫 `/ticket resolver`     — Marcar ticket como resolvido\n';
-        msg += '🎫 `/ticket add/remove`   — Gerenciar acesso ao ticket\n';
-        msg += '\n';
-      }
-
-      // Admin+
-      if (isAdmin) {
-        msg += '🔱 **Admins** *(e Dono)*\n';
-        msg += '✏️ `!editar N campo val`  — Editar campo de um decreto\n';
-        msg += '🗑️ `!apagar N`            — Apagar um decreto\n';
-        msg += '📜 `/changelog listar`    — Listar todos os decretos\n';
-        msg += '📜 `/changelog editar`    — Editar decreto pelo slash\n';
-        msg += '📜 `/changelog apagar`    — Apagar decreto pelo slash\n';
-        msg += '📜 `/changelog imagem`    — Trocar imagem de decreto\n';
-        msg += '🗺️ `/roadmap` (todos subs) — Gerenciar roadmap do site\n';
-        msg += '🚫 `!revogar`             — Listar tokens ativos\n';
-        msg += '🚫 `!revogar @usuário`    — Revogar token de alguém\n';
-        msg += '\n';
-      }
-
-      // Dono
-      if (isDono) {
-        msg += '👑 **Dono** *(exclusivo)*\n';
-        msg += '🔑 Acesso total ao painel do site\n';
-        msg += '🗑️ `token.revogar` — permissão de revogar tokens via site\n';
-        msg += '\n';
-      }
-
-      msg += '✨ **O Oráculo** *(mencione em qualquer canal)*\n';
-      msg += '`@Bot qual torre é melhor?`  — Consulta geral\n';
-      msg += '`@Bot tenho um bug`          — Auxílio técnico\n';
-      msg += '`@Bot sugestão: torre X`     — Análise de ideia\n';
-      msg += '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
-      msg += `*Logado como: ${isDono ? '👑 Dono' : isAdmin ? '🔱 Admin' : isMod ? '⚔️ Moderador' : isEquipe ? '🛡️ Equipe' : '👥 Mortal'}*`;
-
+      msg += '👥 **Para todos os mortais**\n🐛 `/bug` · 💡 `/sugestao` · 🏆 `/rank` · 🎫 Tickets\n\n';
+      if (isEquipe) msg += '🛡️ **Equipe+**\n🔑 `!token` · 📋 `!listar` · 🎫 `/ticket listar/assumir`\n\n';
+      if (isMod) msg += '⚔️ **Moderadores+**\n📜 `!update` · 🗳️ `/enquete` · 🧹 `/limpar` · 📢 `/anunciar` · 🎫 `/ticket painel/fechar/resolver`\n\n';
+      if (isAdmin) msg += '🔱 **Admins+**\n✏️ `!editar/!apagar` · 📜 `/changelog` · 🗺️ `/roadmap` · 🎁 `/gencodigo` · 🚫 `!revogar`\n\n';
+      if (isDono) msg += '👑 **Dono**\nAcesso total ao painel do site\n\n';
+      msg += '✨ **O Oráculo** — mencione o bot para consultar!\n';
+      msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Logado como: ${isDono ? '👑 Dono' : isAdmin ? '🔱 Admin' : isMod ? '⚔️ Moderador' : isEquipe ? '🛡️ Equipe' : '👥 Mortal'}*`;
       return message.reply(msg);
-    }
-
-    if (texto === '!ajuda') {
-      const embedAjuda = new EmbedBuilder()
-        .setColor(CONFIG.CORES.PRIMARIA)
-        .setTitle('🔱 GRIMÓRIO DO OLIMPO')
-        .setDescription('*Selecione a seção do grimório que desejas consultar no menu abaixo.*')
-        .setFooter({ text: 'Tower Deep · Sabedoria Divina' });
-
-      const menuAjuda = new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder()
-          .setCustomId('menu_ajuda')
-          .setPlaceholder('📖 Escolha a página do Grimório...')
-          .addOptions(
-            { label: 'Poderes dos Mortais',    description: 'Comandos acessíveis a todos os jogadores',    value: 'mortais', emoji: '👥' },
-            { label: 'O Oráculo (IA)',          description: 'Como conversar com a Inteligência Divina',   value: 'oraculo', emoji: '✨' },
-            { label: 'Armamento da Equipe',     description: 'Comandos para Equipe e Moderadores',         value: 'equipe',  emoji: '🛡️' },
-            { label: 'Grimório dos Admins',     description: 'Poderes de alto escalão e configuração',     value: 'admin',   emoji: '🔱' },
-          )
-      );
-      return message.reply({ embeds: [embedAjuda], components: [menuAjuda] });
     }
   }
 
-  // Sessão em andamento
   if (sessoes.has(message.author.id)) return processarEtapa(message);
 
-  // Respostas automáticas
   if (!ehComando && !mencionouBot) {
     if (t.includes('bug') || t.includes('erro') || t.includes('bugado')) {
-      await message.reply('🐛 *Encontraste uma anomalia, mortal?*\nUse **`/bug`** para relatar com detalhes — abre um formulário privado!');
+      await message.reply('🐛 *Encontraste uma anomalia, mortal?*\nUse **`/bug`** para relatar com detalhes!');
     } else if (t.includes('quando sai') || t.includes('quando lança') || t.includes('proxima update') || t.includes('próxima update')) {
       try {
         const dados  = await lerGist();
         const previa = dados.proximaUpdate;
-        if (previa) await message.reply(`🔮 *Os oráculos revelam...*\n\n**Próximo Decreto:** ${previa}\n\n*Acompanhe: https://italozkv.github.io/tower-deep/changelog.html*`);
+        if (previa) await message.reply(`🔮 *Os oráculos revelam...*\n\n**Próximo Decreto:** ${previa}`);
         else        await message.reply('🔮 *Os oráculos permanecem em silêncio sobre o próximo decreto...*');
       } catch { await message.reply('🔮 *As visões dos oráculos estão turvas no momento...*'); }
     } else if (t.includes('sugestão') || t.includes('sugestao') || t.includes('ideia')) {
@@ -2919,22 +2352,15 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // XP e Level Up
   if (message.guild && !ehComando) {
-    if (xpData.has(message.author.id)) {
-      xpData.get(message.author.id).username = message.author.username;
-    }
+    if (xpData.has(message.author.id)) xpData.get(message.author.id).username = message.author.username;
     const resultado = ganharXP(message.author.id);
     if (resultado?.subiu) {
       const embedUp = new EmbedBuilder()
-        .setColor(CONFIG.CORES.AVISO)
-        .setTitle('⚡ ASCENSÃO DIVINA! ⚡')
+        .setColor(CONFIG.CORES.AVISO).setTitle('⚡ ASCENSÃO DIVINA! ⚡')
         .setDescription(`${message.author} ascendeu para o título de **${resultado.nivel.nome}** (Nível ${resultado.nivel.nivel})!\n\n*Os deuses do Olimpo reconhecem tua dedicação, mortal.* 🔱`)
-        .setThumbnail(message.author.displayAvatarURL({ dynamic: true }))
-        .setTimestamp();
-
+        .setThumbnail(message.author.displayAvatarURL({ dynamic: true })).setTimestamp();
       if (resultado.nivel.imagem) embedUp.setImage(resultado.nivel.imagem);
-
       await message.channel.send({ content: `${message.author}`, embeds: [embedUp] });
     }
   }
@@ -2944,18 +2370,17 @@ client.on('messageCreate', async (message) => {
 // CANAIS DE VOZ TEMPORÁRIOS (TEMPLOS)
 // ─────────────────────────────────────────────────────────────
 client.on('voiceStateUpdate', async (oldState, newState) => {
-  // Quando alguém entra no canal "Criar Templo"
   if (newState.channelId === CONFIG.CANAL_CRIAR_TEMPLO) {
     const member = newState.member;
     try {
       const guild     = newState.guild;
       const novoCanal = await guild.channels.create({
-        name:   `🏛️ Templo de ${member.user.username}`,
-        type:   ChannelType.GuildVoice,
+        name: `🏛️ Templo de ${member.user.username}`,
+        type: ChannelType.GuildVoice,
         parent: CONFIG.CATEGORIA_TEMPLOS || newState.channel.parentId,
         permissionOverwrites: [
-          { id: guild.id,   allow: [PermissionFlagsBits.ViewChannel] },
-          { id: member.id,  allow: [PermissionFlagsBits.ManageChannels, PermissionFlagsBits.MuteMembers, PermissionFlagsBits.DeafenMembers, PermissionFlagsBits.MoveMembers] },
+          { id: guild.id,  allow: [PermissionFlagsBits.ViewChannel] },
+          { id: member.id, allow: [PermissionFlagsBits.ManageChannels, PermissionFlagsBits.MuteMembers, PermissionFlagsBits.DeafenMembers, PermissionFlagsBits.MoveMembers] },
         ],
       });
       await member.voice.setChannel(novoCanal);
@@ -2963,15 +2388,9 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     } catch (err) { console.error('Erro ao criar templo:', err.message); }
   }
 
-  // Quando alguém sai — apaga templo vazio
   if (oldState.channelId && oldState.channelId !== CONFIG.CANAL_CRIAR_TEMPLO) {
     const canal = oldState.channel;
-    if (
-      canal &&
-      canal.name.startsWith('🏛️ Templo de') &&
-      canal.members.size === 0 &&
-      (canal.parentId === CONFIG.CATEGORIA_TEMPLOS || !CONFIG.CATEGORIA_TEMPLOS)
-    ) {
+    if (canal && canal.name.startsWith('🏛️ Templo de') && canal.members.size === 0 && (canal.parentId === CONFIG.CATEGORIA_TEMPLOS || !CONFIG.CATEGORIA_TEMPLOS)) {
       try {
         await canal.delete('Olimpo apagou o templo vazio');
         console.log(`🗑️ Templo vazio removido: ${canal.name}`);
