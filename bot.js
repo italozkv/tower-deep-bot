@@ -282,8 +282,8 @@ async function lerGist()             { return lerArquivoJsonDoGist('tower-deep-u
 async function salvarGist(dados)     { return salvarArquivoJsonNoGist('tower-deep-updates.json', dados); }
 async function lerEnquetes()         { return lerArquivoJsonDoGist('enquetes.json', []); }
 async function salvarEnquetes(lista) { return salvarArquivoJsonNoGist('enquetes.json', lista); }
-async function lerRoadmap()          { return lerArquivoJsonDoGist('roadmap.json', []); }
-async function salvarRoadmap(v)      { return salvarArquivoJsonNoGist('roadmap.json', v); }
+async function lerRoadmap()          { return lerArquivoJsonDoGist('tower-deep-roadmap.json', []); }
+async function salvarRoadmap(v)      { return salvarArquivoJsonNoGist('tower-deep-roadmap.json', v); }
 
 // ─────────────────────────────────────────────────────────────
 // SISTEMA DE CÓDIGOS DE RESGATE
