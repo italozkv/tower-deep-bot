@@ -28,6 +28,7 @@ const CONFIG = {
   DISCORD_TOKEN:    process.env.DISCORD_TOKEN,
   GITHUB_TOKEN:     process.env.GITHUB_TOKEN,
   GIST_ID:          process.env.GIST_ID,
+  GIST_ROADMAP_ID:  process.env.GIST_ROADMAP_ID || process.env.GIST_ID,
   CANAL_UPDATE_ID:  process.env.CANAL_ID,
   CANAL_ANUNCIO_ID: process.env.CANAL_ANUNCIO_ID,
   CANAL_BUGS_ID:    process.env.CANAL_BUGS_ID,
@@ -241,23 +242,25 @@ function githubRequest(method, path, body = null) {
   });
 }
 
-async function obterGist() {
-  try { return await githubRequest('GET', `/gists/${CONFIG.GIST_ID}`); }
+async function obterGist(gistId) {
+  const id = gistId || CONFIG.GIST_ID;
+  try { return await githubRequest('GET', `/gists/${id}`); }
   catch (err) { console.error('Erro ao obter Gist:', err.message); return { files: {} }; }
 }
 
-async function lerArquivoJsonDoGist(nomeArquivo, fallback) {
+async function lerArquivoJsonDoGist(nomeArquivo, fallback, gistId) {
   try {
-    const gist    = await obterGist();
+    const gist    = await obterGist(gistId);
     const arquivo = gist.files?.[nomeArquivo];
     if (!arquivo?.content) return fallback;
     return JSON.parse(arquivo.content);
   } catch (err) { console.error(`Erro ao ler ${nomeArquivo}:`, err.message); return fallback; }
 }
 
-async function salvarArquivoJsonNoGist(nomeArquivo, conteudo) {
+async function salvarArquivoJsonNoGist(nomeArquivo, conteudo, gistId) {
+  const id = gistId || CONFIG.GIST_ID;
   try {
-    await githubRequest('PATCH', `/gists/${CONFIG.GIST_ID}`, {
+    await githubRequest('PATCH', `/gists/${id}`, {
       files: { [nomeArquivo]: { content: JSON.stringify(conteudo, null, 2) } },
     });
     return true;
@@ -283,17 +286,17 @@ async function salvarGist(dados)     { return salvarArquivoJsonNoGist('tower-dee
 async function lerEnquetes()         { return lerArquivoJsonDoGist('enquetes.json', []); }
 async function salvarEnquetes(lista) { return salvarArquivoJsonNoGist('enquetes.json', lista); }
 async function lerRoadmap() {
-  const dados = await lerArquivoJsonDoGist('tower-deep-roadmap.json', { fases: [] });
-  return Array.isArray(dados) ? dados : (dados.fases || []);
+  const dados = await lerArquivoJsonDoGist('tower-deep-roadmap.json', null, CONFIG.GIST_ROADMAP_ID);
+  if (!dados) { console.error('[ROADMAP] Arquivo não encontrado no gist', CONFIG.GIST_ROADMAP_ID); return []; }
+  if (Array.isArray(dados)) return dados;
+  for (const key of Object.keys(dados)) {
+    if (Array.isArray(dados[key])) return dados[key];
+  }
+  return [];
 }
-async function lerRoadmapCompleto() {
-  return lerArquivoJsonDoGist('tower-deep-roadmap.json', { meta: { version: '3.0', ano: 2026, ultimaAtualizacao: new Date().toISOString().split('T')[0] }, fases: [] });
-}
-async function salvarRoadmap(fases) {
-  const dadosCompletos = await lerRoadmapCompleto();
-  dadosCompletos.fases = fases;
-  dadosCompletos.meta.ultimaAtualizacao = new Date().toISOString().split('T')[0];
-  return salvarArquivoJsonNoGist('tower-deep-roadmap.json', dadosCompletos);
+async function salvarRoadmap(versoes) {
+  // O JSON do roadmap é um array direto — salva como está
+  return salvarArquivoJsonNoGist('tower-deep-roadmap.json', versoes, CONFIG.GIST_ROADMAP_ID);
 }
 
 // ─────────────────────────────────────────────────────────────
