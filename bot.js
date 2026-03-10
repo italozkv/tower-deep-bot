@@ -282,8 +282,19 @@ async function lerGist()             { return lerArquivoJsonDoGist('tower-deep-u
 async function salvarGist(dados)     { return salvarArquivoJsonNoGist('tower-deep-updates.json', dados); }
 async function lerEnquetes()         { return lerArquivoJsonDoGist('enquetes.json', []); }
 async function salvarEnquetes(lista) { return salvarArquivoJsonNoGist('enquetes.json', lista); }
-async function lerRoadmap()          { return lerArquivoJsonDoGist('tower-deep-roadmap.json', []); }
-async function salvarRoadmap(v)      { return salvarArquivoJsonNoGist('tower-deep-roadmap.json', v); }
+async function lerRoadmap() {
+  const dados = await lerArquivoJsonDoGist('tower-deep-roadmap.json', { fases: [] });
+  return Array.isArray(dados) ? dados : (dados.fases || []);
+}
+async function lerRoadmapCompleto() {
+  return lerArquivoJsonDoGist('tower-deep-roadmap.json', { meta: { version: '3.0', ano: 2026, ultimaAtualizacao: new Date().toISOString().split('T')[0] }, fases: [] });
+}
+async function salvarRoadmap(fases) {
+  const dadosCompletos = await lerRoadmapCompleto();
+  dadosCompletos.fases = fases;
+  dadosCompletos.meta.ultimaAtualizacao = new Date().toISOString().split('T')[0];
+  return salvarArquivoJsonNoGist('tower-deep-roadmap.json', dadosCompletos);
+}
 
 // ─────────────────────────────────────────────────────────────
 // SISTEMA DE CÓDIGOS DE RESGATE
@@ -1587,8 +1598,8 @@ client.on('interactionCreate', async (interaction) => {
           const status = interaction.options.getString('status');
           const data   = interaction.options.getString('data') || '';
           const lore   = interaction.options.getString('lore') || '';
-          if (versoes.find(v => v.versao === versao)) return interaction.editReply({ content: `⚠️ *A versão ${versao} já existe nos pergaminhos.*` });
-          versoes.push({ versao, titulo, status, data, lore, itens: [] });
+          if (versoes.find(v => (v.versao || v.nome) === versao)) return interaction.editReply({ content: `⚠️ *A versão ${versao} já existe nos pergaminhos.*` });
+          versoes.push({ versao, nome: versao, titulo, status, data, lore, itens: [], objetivo: titulo, cor: '#c9a84c', emoji: '📜' });
           await salvarRoadmap(versoes);
           return interaction.editReply({ content: `🗺️ **${versao} — ${titulo}** adicionada ao roadmap!` });
         }
@@ -1596,8 +1607,8 @@ client.on('interactionCreate', async (interaction) => {
           const versao = interaction.options.getString('versao');
           const texto  = interaction.options.getString('texto');
           const badge  = interaction.options.getString('badge') || 'Novo';
-          const v = versoes.find(v => v.versao === versao);
-          if (!v) return interaction.editReply({ content: `⚠️ *Versão ${versao} não encontrada.*` });
+          const v = versoes.find(v => (v.versao || v.nome) === versao);
+          if (!v) return interaction.editReply({ content: `⚠️ *Versão ${versao} não encontrada. Versões disponíveis: ${versoes.map(x => x.versao || x.nome).join(', ')}*` });
           v.itens = v.itens || [];
           v.itens.push({ texto, badge, concluido: false });
           await salvarRoadmap(versoes);
@@ -1606,8 +1617,8 @@ client.on('interactionCreate', async (interaction) => {
         if (sub === 'concluir') {
           const versao    = interaction.options.getString('versao');
           const itemBusca = interaction.options.getString('item').toLowerCase();
-          const v = versoes.find(v => v.versao === versao);
-          if (!v) return interaction.editReply({ content: `⚠️ *Versão ${versao} não encontrada.*` });
+          const v = versoes.find(v => (v.versao || v.nome) === versao);
+          if (!v) return interaction.editReply({ content: `⚠️ *Versão ${versao} não encontrada. Versões disponíveis: ${versoes.map(x => x.versao || x.nome).join(', ')}*` });
           const item = v.itens?.find(i => i.texto.toLowerCase().includes(itemBusca));
           if (!item) return interaction.editReply({ content: `⚠️ *Item não encontrado.*` });
           item.concluido = true;
@@ -1617,8 +1628,8 @@ client.on('interactionCreate', async (interaction) => {
         if (sub === 'status') {
           const versao = interaction.options.getString('versao');
           const status = interaction.options.getString('status');
-          const v = versoes.find(v => v.versao === versao);
-          if (!v) return interaction.editReply({ content: `⚠️ *Versão ${versao} não encontrada.*` });
+          const v = versoes.find(v => (v.versao || v.nome) === versao);
+          if (!v) return interaction.editReply({ content: `⚠️ *Versão ${versao} não encontrada. Versões disponíveis: ${versoes.map(x => x.versao || x.nome).join(', ')}*` });
           v.status = status;
           await salvarRoadmap(versoes);
           return interaction.editReply({ content: `⚡ *Status de ${versao} atualizado para: ${status}*` });
