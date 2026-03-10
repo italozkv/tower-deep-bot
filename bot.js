@@ -182,7 +182,7 @@ function getProximoNivel(xp){ for (const n of NIVEIS_XP) { if (xp < n.xpMin) ret
 
 function ganharXP(userId) {
   const agora = Date.now();
-  if (!xpData.has(userId)) xpData.set(userId, { xp: 0, nivel: 1, lastMsg: 0 });
+  if (!xpData.has(userId)) xpData.set(userId, { xp: 0, nivel: 1, msgs: 0, username: '', lastMsg: 0 });
   const dados = xpData.get(userId);
   if (agora - dados.lastMsg < 30000) return null;
   const ganho       = Math.floor(Math.random() * 6) + 5;
@@ -277,7 +277,12 @@ async function carregarXP() {
 
 async function salvarXP() {
   const xpJson = {};
-  for (const [userId, dados] of xpData.entries()) xpJson[userId] = { xp: dados.xp, nivel: dados.nivel };
+  for (const [userId, dados] of xpData.entries()) xpJson[userId] = {
+    xp: dados.xp,
+    nivel: dados.nivel,
+    msgs: dados.msgs || 0,
+    username: dados.username || '',
+  };
   return salvarArquivoJsonNoGist('xp-data.json', xpJson);
 }
 
@@ -1027,7 +1032,12 @@ async function processarEtapa(message) {
       const dadosAtuais = await lerGist();
       const mes         = new Date().toLocaleString('pt-BR', { month: 'short', year: 'numeric' });
       dadosAtuais.updates = dadosAtuais.updates || [];
-      dadosAtuais.updates.unshift({ id: Date.now(), versao: dados.versao, titulo: dados.titulo, subtitulo: dados.subtitulo, tags: dados.tags, mudancas: dados.mudancas, imagem: dados.imagem || null, data: mes });
+      // Salvar tags como array de objetos {key, label} para o site exibir corretamente
+      const tagsComLabel = dados.tags.map(key => {
+        const tagInfo = Object.values(TAGS).find(t => t.key === key);
+        return { key, label: tagInfo?.label || key };
+      });
+      dadosAtuais.updates.unshift({ id: Date.now(), versao: dados.versao, titulo: dados.titulo, subtitulo: dados.subtitulo, tags: dados.tags, tagsInfo: tagsComLabel, mudancas: dados.mudancas, imagem: dados.imagem || null, data: mes });
       if (dados.proximo) dadosAtuais.proximaUpdate = dados.proximo;
       const ok = await salvarGist(dadosAtuais);
       if (!ok) throw new Error('Falha ao salvar update no Gist.');
@@ -1643,7 +1653,7 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isChatInputCommand() && interaction.commandName === 'rank') {
       const userId = interaction.user.id;
-      if (!xpData.has(userId)) xpData.set(userId, { xp: 0, nivel: 1, lastMsg: 0 });
+      if (!xpData.has(userId)) xpData.set(userId, { xp: 0, nivel: 1, msgs: 0, username: interaction.user.username, lastMsg: 0 });
       const dados   = xpData.get(userId);
       const nivel   = getNivel(dados.xp);
       const proximo = getProximoNivel(dados.xp);
