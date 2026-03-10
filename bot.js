@@ -1863,9 +1863,60 @@ client.on('interactionCreate', async (interaction) => {
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada. Use /gencodigo novamente.', ephemeral: true });
-      sessao.tiposSelecionados = interaction.values;
+
+      const tiposBrutos = interaction.values;
+      const temItem = tiposBrutos.includes('item');
+
+      if (temItem) {
+        // Salva os tipos brutos e abre modal para perguntar quantos itens
+        sessao._tiposBrutos = tiposBrutos;
+        const modal = new ModalBuilder()
+          .setCustomId(`gc_qtditens_${adminId}`)
+          .setTitle('Quantos Itens do Jogo?')
+          .addComponents(new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('qtd_itens')
+              .setLabel('Quantos itens diferentes deseja adicionar?')
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+              .setPlaceholder('Ex: 2')
+              .setMinLength(1)
+              .setMaxLength(2)
+          ));
+        return interaction.showModal(modal);
+      }
+
+      // Sem item: fluxo normal
+      sessao.tiposSelecionados = tiposBrutos;
       sessao.tiposIdx = 0;
       // NÃO dar deferUpdate aqui — avancarRecompensa pode precisar abrir modal
+      return await avancarRecompensa(interaction, sessao, adminId);
+    }
+
+    // Modal → quantos itens do jogo
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('gc_qtditens_')) {
+      const adminId = interaction.customId.split('gc_qtditens_')[1];
+      if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
+      const sessao = sessoescodigo.get(interaction.user.id);
+      if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada. Use /gencodigo novamente.', ephemeral: true });
+      await interaction.deferUpdate();
+
+      const qtdItens = Math.max(1, Math.min(10, parseInt(interaction.fields.getTextInputValue('qtd_itens')) || 1));
+      const tiposBrutos = sessao._tiposBrutos || [];
+
+      // Expande 'item' para qtdItens slots e mantém os outros tipos na ordem
+      const tiposExpandidos = [];
+      for (const t of tiposBrutos) {
+        if (t === 'item') {
+          for (let i = 0; i < qtdItens; i++) tiposExpandidos.push('item');
+        } else {
+          tiposExpandidos.push(t);
+        }
+      }
+      sessao.tiposSelecionados = tiposExpandidos;
+      sessao.tiposIdx = 0;
+      delete sessao._tiposBrutos;
+
       return await avancarRecompensa(interaction, sessao, adminId);
     }
 
