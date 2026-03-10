@@ -1380,10 +1380,10 @@ async function avancarRecompensa(interaction, sessao, adminId) {
     const proxTipo = sessao.tiposSelecionados[proxIdx];
 
     if (proxTipo === 'item') {
+      // Item: mostrar menu de categorias (update/editReply, não modal)
       const catalogo   = await getCatalogoCompleto();
       const categorias = [...new Set(catalogo.map(i => i.categoria))].sort();
 
-      // CORREÇÃO: StringSelectMenuOptionBuilder sem emoji
       const opsCat = categorias.slice(0, 25).map(c =>
         new StringSelectMenuOptionBuilder()
           .setLabel(c.slice(0, 100))
@@ -1399,27 +1399,69 @@ async function avancarRecompensa(interaction, sessao, adminId) {
       );
 
       const recompListadas = sessao.recompensas.length
-        ? sessao.recompensas.map(r => r.label).join('\n')
+        ? sessao.recompensas.map((r, i) => `**${i+1}.** ${r.label}`).join('\n')
         : '*Nenhuma ainda*';
 
-      return interaction.editReply({
+      const embedCat = {
         embeds: [new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA)
           .setTitle(`🎁 Recompensa ${proxIdx + 1}/${sessao.tiposSelecionados.length}`)
           .setDescription(`*Já adicionadas:*\n${recompListadas}\n\n*Selecione a categoria do próximo item:*`)],
         components: [menuCat],
-      });
+      };
+
+      // StringSelectMenu e Button usam update(); ModalSubmit usa editReply()
+      if (interaction.isStringSelectMenu() || interaction.isButton()) {
+        return interaction.update(embedCat);
+      } else {
+        return interaction.editReply(embedCat);
+      }
+
     } else {
+      // Moedas/Gemas/XP etc: abrir modal
       const info = TIPOS_RECOMPENSA[proxTipo];
+
+      const recompListadas = sessao.recompensas.length
+        ? sessao.recompensas.map((r, i) => `${i+1}. ${r.label}`).join(' | ')
+        : '';
+
       const modal = new ModalBuilder()
         .setCustomId(`gc_qtd_${adminId}_${proxIdx}`)
-        .setTitle(`Recompensa ${proxIdx + 1}: ${info.label}`)
+        .setTitle(`Recompensa ${proxIdx + 1}/${sessao.tiposSelecionados.length}: ${info.label}`)
         .addComponents(
           new ActionRowBuilder().addComponents(
             new TextInputBuilder()
-              .setCustomId('valor').setLabel(`Quantidade de ${info.unidade}`)
-              .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 500')
+              .setCustomId('valor')
+              .setLabel(`Quantidade de ${info.unidade}` + (recompListadas ? ` (já: ${recompListadas.slice(0,40)})` : ''))
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+              .setPlaceholder('Ex: 500')
           )
         );
+
+      // Modal só pode ser aberto se a interaction ainda não foi respondida (não passou por defer/update)
+      // StringSelectMenu e Button: showModal direto
+      // ModalSubmit: precisa de deferUpdate primeiro, depois editReply com novo embed+botão invisível não funciona
+      // Solução: para ModalSubmit encadeado, usar uma mensagem intermediária com botão "Próxima Recompensa"
+      if (interaction.isModalSubmit()) {
+        // Após modal submit, não podemos abrir outro modal diretamente.
+        // Mostramos um botão que o admin clica para abrir o próximo modal.
+        const btnNext = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`gc_next_${adminId}_${proxIdx}`)
+            .setLabel(`▶ Inserir Recompensa ${proxIdx + 1}: ${info.label}`)
+            .setStyle(ButtonStyle.Primary)
+        );
+        const recompAtuais = sessao.recompensas.length
+          ? sessao.recompensas.map((r, i) => `**${i+1}.** ${r.label}`).join('\n')
+          : '*Nenhuma ainda*';
+        return interaction.editReply({
+          embeds: [new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA)
+            .setTitle(`🎁 Código em Progresso — ${sessao.recompensas.length}/${sessao.tiposSelecionados.length} recompensas`)
+            .setDescription(`*Recompensas adicionadas:*\n${recompAtuais}\n\n*Clique no botão para inserir a próxima recompensa.*`)],
+          components: [btnNext],
+        });
+      }
+
       return interaction.showModal(modal);
     }
   }
@@ -1438,6 +1480,8 @@ async function avancarRecompensa(interaction, sessao, adminId) {
     invalidarCache();
     sessoescodigo.delete(interaction.user.id);
 
+    const listaRecomp = sessao.recompensas.map((r, i) => `**${i+1}.** ${r.label}`).join('\n');
+
     const embedConf = new EmbedBuilder()
       .setColor(CONFIG.CORES.SUCESSO)
       .setTitle('✅ Código Gerado!')
@@ -1446,10 +1490,17 @@ async function avancarRecompensa(interaction, sessao, adminId) {
         { name: '📝 Descrição',   value: sessao.descricao,                                                 inline: true  },
         { name: '👥 Max Usos',    value: sessao.maxUsos ? String(sessao.maxUsos) : 'Ilimitado',            inline: true  },
         { name: '⏰ Expira',       value: expira ? new Date(expira).toLocaleDateString('pt-BR') : 'Nunca', inline: true  },
-        { name: '🎀 Recompensas', value: sessao.recompensas.map(r => r.label).join('\n'),                  inline: false },
+        { name: '🎀 Recompensas', value: listaRecomp || '—',                                               inline: false },
       )
       .setFooter({ text: 'Anunciado no canal de códigos' });
-    await interaction.editReply({ embeds: [embedConf], components: [] });
+
+    if (interaction.isModalSubmit()) {
+      await interaction.editReply({ embeds: [embedConf], components: [] });
+    } else if (interaction.isButton()) {
+      await interaction.update({ embeds: [embedConf], components: [] });
+    } else {
+      await interaction.editReply({ embeds: [embedConf], components: [] });
+    }
 
     const guild = interaction.guild;
     const canalCodigos = CONFIG.CANAL_CODIGOS
@@ -1814,7 +1865,7 @@ client.on('interactionCreate', async (interaction) => {
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada. Use /gencodigo novamente.', ephemeral: true });
       sessao.tiposSelecionados = interaction.values;
       sessao.tiposIdx = 0;
-      await interaction.deferUpdate();
+      // NÃO dar deferUpdate aqui — avancarRecompensa pode precisar abrir modal
       return await avancarRecompensa(interaction, sessao, adminId);
     }
 
@@ -1893,6 +1944,7 @@ client.on('interactionCreate', async (interaction) => {
     // Modal → quantidade de moedas/gemas/xp
     if (interaction.isModalSubmit() && interaction.customId.startsWith('gc_qtd_')) {
       const parts   = interaction.customId.split('_');
+      // customId = 'gc_qtd_ADMINID_IDX' — adminId é parts[2], idx é parts[3]
       const adminId = parts[2];
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
@@ -1904,6 +1956,33 @@ client.on('interactionCreate', async (interaction) => {
       sessao.recompensas.push({ tipo, valor, quantidade: valor, label: `${info.label}: ${valor} ${info.unidade}` });
       sessao.tiposIdx++;
       return await avancarRecompensa(interaction, sessao, adminId);
+    }
+
+    // Botão "Próxima Recompensa" — abre modal após um ModalSubmit encadeado
+    if (interaction.isButton() && interaction.customId.startsWith('gc_next_')) {
+      const parts   = interaction.customId.split('_');
+      const adminId = parts[2];
+      if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
+      const sessao = sessoescodigo.get(interaction.user.id);
+      if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada. Use /gencodigo novamente.', ephemeral: true });
+      const proxIdx = sessao.tiposIdx;
+      const proxTipo = sessao.tiposSelecionados[proxIdx];
+      const info = TIPOS_RECOMPENSA[proxTipo];
+      if (!info) return interaction.reply({ content: '⚠️ Tipo inválido.', ephemeral: true });
+      const modal = new ModalBuilder()
+        .setCustomId(`gc_qtd_${adminId}_${proxIdx}`)
+        .setTitle(`Recompensa ${proxIdx + 1}/${sessao.tiposSelecionados.length}: ${info.label}`)
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('valor')
+              .setLabel(`Quantidade de ${info.unidade}`)
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+              .setPlaceholder('Ex: 500')
+          )
+        );
+      return interaction.showModal(modal);
     }
 
     // Botão voltar às categorias
