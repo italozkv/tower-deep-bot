@@ -621,8 +621,45 @@ const PERMISSOES = {
   equipe:    ['wiki.view_exclusivo'],
 };
 
-const tokensAtivos    = new Map();
+const tokensAtivos     = new Map();
 const TOKEN_DURACAO_MS = 60 * 60 * 1000;
+
+// ── Persistência de tokens em arquivo (sobrevive a restarts do Railway) ───────
+const TOKENS_FILE = path.join(__dirname, 'tokens_ativos.json');
+
+function salvarTokensEmDisco() {
+  try {
+    const obj = {};
+    for (const [tk, dados] of tokensAtivos) obj[tk] = dados;
+    fs.writeFileSync(TOKENS_FILE, JSON.stringify(obj, null, 2), 'utf8');
+  } catch (e) {
+    console.error('⚠️ Erro ao salvar tokens em disco:', e.message);
+  }
+}
+
+function carregarTokensDoDiscoCom() {
+  try {
+    if (!fs.existsSync(TOKENS_FILE)) return;
+    const raw  = fs.readFileSync(TOKENS_FILE, 'utf8');
+    const obj  = JSON.parse(raw);
+    const agora = Date.now();
+    let carregados = 0;
+    for (const [tk, dados] of Object.entries(obj)) {
+      if (dados.expira > agora) {          // só carrega tokens ainda válidos
+        tokensAtivos.set(tk, dados);
+        carregados++;
+      }
+    }
+    if (carregados > 0) console.log(`🔑 ${carregados} token(s) restaurado(s) do disco.`);
+    // Re-salva já sem os expirados
+    salvarTokensEmDisco();
+  } catch (e) {
+    console.error('⚠️ Erro ao carregar tokens do disco:', e.message);
+  }
+}
+
+// Carrega tokens persistidos ao iniciar (antes do bot conectar)
+carregarTokensDoDiscoCom();
 
 function gerarToken() {
   const chars = 'abcdef0123456789';
@@ -641,9 +678,11 @@ function detectarNivelToken(member) {
 
 setInterval(() => {
   const agora = Date.now();
+  let removidos = 0;
   for (const [tk, dados] of tokensAtivos) {
-    if (dados.expira < agora) tokensAtivos.delete(tk);
+    if (dados.expira < agora) { tokensAtivos.delete(tk); removidos++; }
   }
+  if (removidos > 0) salvarTokensEmDisco();
 }, 5 * 60 * 1000);
 
 async function handleToken(message) {
@@ -664,6 +703,7 @@ async function handleToken(message) {
     nivel: nivelDef.nivel, userId: message.author.id, username: message.author.username,
     expira, criadoEm: Date.now(),
   });
+  salvarTokensEmDisco(); // persiste no disco imediatamente
   const expiraStr = new Date(expira).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   const perms     = PERMISSOES[nivelDef.nivel] || [];
   try {
@@ -724,6 +764,7 @@ async function handleRevogar(message, args) {
   for (const [tk, dados] of tokensAtivos) {
     if (dados.userId === userId) { tokensAtivos.delete(tk); revogados++; }
   }
+  if (revogados > 0) salvarTokensEmDisco();
   return message.reply(revogados > 0 ? `✅ Token revogado para <@${userId}>.` : `⚠️ Nenhum token ativo encontrado para <@${userId}>.`);
 }
 
@@ -744,7 +785,7 @@ const servidor = http.createServer((req, res) => {
         const { token } = JSON.parse(body);
         const dados     = tokensAtivos.get(token);
         if (!dados || dados.expira < Date.now()) {
-          if (dados) tokensAtivos.delete(token);
+          if (dados) { tokensAtivos.delete(token); salvarTokensEmDisco(); }
           res.writeHead(401, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ ok: false, erro: 'Token inválido ou expirado.' }));
         }
@@ -784,6 +825,7 @@ const servidor = http.createServer((req, res) => {
         const { token } = JSON.parse(body);
         const existed = tokensAtivos.has(token);
         tokensAtivos.delete(token);
+        if (existed) salvarTokensEmDisco();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, revogado: existed }));
       } catch {
@@ -797,6 +839,7 @@ const servidor = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/revogar-todos') {
     const total = tokensAtivos.size;
     tokensAtivos.clear();
+    salvarTokensEmDisco();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true, total }));
   }
@@ -807,6 +850,7 @@ const servidor = http.createServer((req, res) => {
     for (const [token, dados] of tokensAtivos.entries()) {
       if (dados.expira < agora) { tokensAtivos.delete(token); removidos++; }
     }
+    if (removidos > 0) salvarTokensEmDisco();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true, removidos }));
   }
@@ -1376,23 +1420,11 @@ async function registrarSlashCommands(clientId) {
 async function avancarRecompensa(interaction, sessao, adminId) {
   const proxIdx = sessao.tiposIdx;
 
-  // Helper: responde ou atualiza a mensagem dependendo do tipo de interaction
-  async function responder(payload) {
-    if (interaction.isStringSelectMenu() || interaction.isButton()) {
-      return interaction.update({ ...payload, fetchReply: false });
-    } else if (interaction.isModalSubmit()) {
-      // ModalSubmit: deferUpdate já foi chamado antes de chegar aqui, usar editReply
-      return interaction.editReply(payload);
-    } else {
-      return interaction.editReply(payload);
-    }
-  }
-
   if (proxIdx < sessao.tiposSelecionados.length) {
     const proxTipo = sessao.tiposSelecionados[proxIdx];
 
     if (proxTipo === 'item') {
-      // Item: mostrar menu de categorias
+      // Item: mostrar menu de categorias (update/editReply, não modal)
       const catalogo   = await getCatalogoCompleto();
       const categorias = [...new Set(catalogo.map(i => i.categoria))].sort();
 
@@ -1414,37 +1446,58 @@ async function avancarRecompensa(interaction, sessao, adminId) {
         ? sessao.recompensas.map((r, i) => `**${i+1}.** ${r.label}`).join('\n')
         : '*Nenhuma ainda*';
 
-      return responder({
+      const embedCat = {
         embeds: [new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA)
           .setTitle(`🎁 Recompensa ${proxIdx + 1}/${sessao.tiposSelecionados.length}`)
           .setDescription(`*Já adicionadas:*\n${recompListadas}\n\n*Selecione a categoria do próximo item:*`)],
         components: [menuCat],
-      });
+      };
+
+      // StringSelectMenu e Button usam update(); ModalSubmit usa editReply()
+      if (interaction.isStringSelectMenu() || interaction.isButton()) {
+        return interaction.update(embedCat);
+      } else {
+        return interaction.editReply(embedCat);
+      }
 
     } else {
-      // Moedas/Gemas/XP etc.
+      // Moedas/Gemas/XP etc: abrir modal
       const info = TIPOS_RECOMPENSA[proxTipo];
-      if (!info) {
-        console.error('[avancarRecompensa] tipo desconhecido:', proxTipo, 'idx:', proxIdx, 'tipos:', sessao.tiposSelecionados);
-        return responder({ content: '⚠️ Tipo de recompensa inválido. Use /gencodigo novamente.', embeds: [], components: [] });
-      }
 
       const recompListadas = sessao.recompensas.length
         ? sessao.recompensas.map((r, i) => `${i+1}. ${r.label}`).join(' | ')
         : '';
 
+      const modal = new ModalBuilder()
+        .setCustomId(`gc_qtd_${adminId}_${proxIdx}`)
+        .setTitle(`Recompensa ${proxIdx + 1}/${sessao.tiposSelecionados.length}: ${info.label}`)
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('valor')
+              .setLabel(`Quantidade de ${info.unidade}` + (recompListadas ? ` (já: ${recompListadas.slice(0,40)})` : ''))
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+              .setPlaceholder('Ex: 500')
+          )
+        );
+
+      // Modal só pode ser aberto se a interaction ainda não foi respondida (não passou por defer/update)
+      // StringSelectMenu e Button: showModal direto
+      // ModalSubmit: precisa de deferUpdate primeiro, depois editReply com novo embed+botão invisível não funciona
+      // Solução: para ModalSubmit encadeado, usar uma mensagem intermediária com botão "Próxima Recompensa"
       if (interaction.isModalSubmit()) {
-        // Após qualquer ModalSubmit não podemos abrir outro modal diretamente.
-        // Mostramos botão intermediário — o admin clica e abre o modal.
-        const recompAtuais = sessao.recompensas.length
-          ? sessao.recompensas.map((r, i) => `**${i+1}.** ${r.label}`).join('\n')
-          : '*Nenhuma ainda*';
+        // Após modal submit, não podemos abrir outro modal diretamente.
+        // Mostramos um botão que o admin clica para abrir o próximo modal.
         const btnNext = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId(`gc_next_${adminId}_${proxIdx}`)
             .setLabel(`▶ Inserir Recompensa ${proxIdx + 1}: ${info.label}`)
             .setStyle(ButtonStyle.Primary)
         );
+        const recompAtuais = sessao.recompensas.length
+          ? sessao.recompensas.map((r, i) => `**${i+1}.** ${r.label}`).join('\n')
+          : '*Nenhuma ainda*';
         return interaction.editReply({
           embeds: [new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA)
             .setTitle(`🎁 Código em Progresso — ${sessao.recompensas.length}/${sessao.tiposSelecionados.length} recompensas`)
@@ -1453,20 +1506,6 @@ async function avancarRecompensa(interaction, sessao, adminId) {
         });
       }
 
-      // StringSelectMenu ou Button: podemos abrir modal diretamente
-      const modal = new ModalBuilder()
-        .setCustomId(`gc_qtd_${adminId}_${proxIdx}`)
-        .setTitle(`Recompensa ${proxIdx + 1}/${sessao.tiposSelecionados.length}: ${info.label}`.slice(0, 45))
-        .addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId('valor')
-              .setLabel((`Quantidade de ${info.unidade}` + (recompListadas ? ` (já: ${recompListadas.slice(0,30)})` : '')).slice(0, 45))
-              .setStyle(TextInputStyle.Short)
-              .setRequired(true)
-              .setPlaceholder('Ex: 500')
-          )
-        );
       return interaction.showModal(modal);
     }
   }
@@ -1864,7 +1903,7 @@ client.on('interactionCreate', async (interaction) => {
 
     // Passo 1 → Tipos selecionados
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('gc_tipo_')) {
-      const adminId = interaction.customId.slice('gc_tipo_'.length);
+      const adminId = interaction.customId.split('gc_tipo_')[1];
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada. Use /gencodigo novamente.', ephemeral: true });
@@ -1900,7 +1939,7 @@ client.on('interactionCreate', async (interaction) => {
 
     // Modal → quantos itens do jogo
     if (interaction.isModalSubmit() && interaction.customId.startsWith('gc_qtditens_')) {
-      const adminId = interaction.customId.slice('gc_qtditens_'.length);
+      const adminId = interaction.customId.split('gc_qtditens_')[1];
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada. Use /gencodigo novamente.', ephemeral: true });
@@ -1927,7 +1966,7 @@ client.on('interactionCreate', async (interaction) => {
 
     // Passo 2 → Categoria selecionada → listar itens
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('gc_cat_')) {
-      const adminId = interaction.customId.slice('gc_cat_'.length);
+      const adminId = interaction.customId.split('gc_cat_')[1];
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
@@ -1964,7 +2003,7 @@ client.on('interactionCreate', async (interaction) => {
 
     // Passo 2b → Item selecionado → pedir quantidade
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('gc_item_')) {
-      const adminId = interaction.customId.slice('gc_item_'.length);
+      const adminId = interaction.customId.split('gc_item_')[1];
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
@@ -1984,7 +2023,7 @@ client.on('interactionCreate', async (interaction) => {
 
     // Modal → quantidade de item do catálogo
     if (interaction.isModalSubmit() && interaction.customId.startsWith('gc_qtditem_')) {
-      const adminId = interaction.customId.slice('gc_qtditem_'.length);
+      const adminId = interaction.customId.split('gc_qtditem_')[1];
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
@@ -1998,24 +2037,16 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     // Modal → quantidade de moedas/gemas/xp
-    // customId = 'gc_qtd_ADMINID_IDX' onde ADMINID pode conter dígitos; IDX é sempre o ÚLTIMO segmento
     if (interaction.isModalSubmit() && interaction.customId.startsWith('gc_qtd_')) {
-      const semPrefixo    = interaction.customId.slice('gc_qtd_'.length);
-      const lastUnder     = semPrefixo.lastIndexOf('_');
-      const adminId       = semPrefixo.slice(0, lastUnder);
-      const idxNoCustomId = parseInt(semPrefixo.slice(lastUnder + 1));
+      const parts   = interaction.customId.split('_');
+      // customId = 'gc_qtd_ADMINID_IDX' — adminId é parts[2], idx é parts[3]
+      const adminId = parts[2];
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
       await interaction.deferUpdate();
-      // Usa o idx gravado no customId como fonte da verdade — evita dessincronização
-      sessao.tiposIdx = idxNoCustomId;
       const tipo  = sessao.tiposSelecionados[sessao.tiposIdx];
       const info  = TIPOS_RECOMPENSA[tipo];
-      if (!tipo || !info) {
-        console.error('[gc_qtd] tipo inválido idx=' + sessao.tiposIdx + ' tipos=' + JSON.stringify(sessao.tiposSelecionados));
-        return interaction.editReply({ content: '⚠️ Erro interno: tipo inválido. Use /gencodigo novamente.', components: [] });
-      }
       const valor = parseInt(interaction.fields.getTextInputValue('valor')) || 0;
       sessao.recompensas.push({ tipo, valor, quantidade: valor, label: `${info.label}: ${valor} ${info.unidade}` });
       sessao.tiposIdx++;
@@ -2023,34 +2054,24 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     // Botão "Próxima Recompensa" — abre modal após um ModalSubmit encadeado
-    // customId = 'gc_next_ADMINID_IDX' onde IDX é o último segmento
     if (interaction.isButton() && interaction.customId.startsWith('gc_next_')) {
-      const semPrefixo    = interaction.customId.slice('gc_next_'.length);
-      const lastUnder     = semPrefixo.lastIndexOf('_');
-      const adminId       = semPrefixo.slice(0, lastUnder);
-      const idxNoCustomId = parseInt(semPrefixo.slice(lastUnder + 1));
+      const parts   = interaction.customId.split('_');
+      const adminId = parts[2];
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada. Use /gencodigo novamente.', ephemeral: true });
-      // Sincroniza tiposIdx com o idx do botão antes de tudo
-      sessao.tiposIdx = idxNoCustomId;
-      const proxTipo = sessao.tiposSelecionados[sessao.tiposIdx];
+      const proxIdx = sessao.tiposIdx;
+      const proxTipo = sessao.tiposSelecionados[proxIdx];
       const info = TIPOS_RECOMPENSA[proxTipo];
-      if (!proxTipo || !info) {
-        console.error('[gc_next] tipo inválido idx=' + sessao.tiposIdx + ' tipos=' + JSON.stringify(sessao.tiposSelecionados));
-        return interaction.reply({ content: '⚠️ Tipo inválido. Use /gencodigo novamente.', ephemeral: true });
-      }
-      const recompListadas = sessao.recompensas.length
-        ? sessao.recompensas.map((r, i) => `${i+1}. ${r.label}`).join(' | ')
-        : '';
+      if (!info) return interaction.reply({ content: '⚠️ Tipo inválido.', ephemeral: true });
       const modal = new ModalBuilder()
-        .setCustomId(`gc_qtd_${adminId}_${sessao.tiposIdx}`)
-        .setTitle(`Recompensa ${sessao.tiposIdx + 1}/${sessao.tiposSelecionados.length}: ${info.label}`.slice(0, 45))
+        .setCustomId(`gc_qtd_${adminId}_${proxIdx}`)
+        .setTitle(`Recompensa ${proxIdx + 1}/${sessao.tiposSelecionados.length}: ${info.label}`)
         .addComponents(
           new ActionRowBuilder().addComponents(
             new TextInputBuilder()
               .setCustomId('valor')
-              .setLabel((`Quantidade de ${info.unidade}` + (recompListadas ? ` (já: ${recompListadas.slice(0,30)})` : '')).slice(0, 45))
+              .setLabel(`Quantidade de ${info.unidade}`)
               .setStyle(TextInputStyle.Short)
               .setRequired(true)
               .setPlaceholder('Ex: 500')
@@ -2061,7 +2082,7 @@ client.on('interactionCreate', async (interaction) => {
 
     // Botão voltar às categorias
     if (interaction.isButton() && interaction.customId.startsWith('gc_voltarcat_')) {
-      const adminId = interaction.customId.slice('gc_voltarcat_'.length);
+      const adminId = interaction.customId.split('gc_voltarcat_')[1];
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
