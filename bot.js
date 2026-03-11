@@ -1859,7 +1859,7 @@ client.on('interactionCreate', async (interaction) => {
 
     // Passo 1 → Tipos selecionados
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('gc_tipo_')) {
-      const adminId = interaction.customId.split('gc_tipo_')[1];
+      const adminId = interaction.customId.slice('gc_tipo_'.length);
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada. Use /gencodigo novamente.', ephemeral: true });
@@ -1895,7 +1895,7 @@ client.on('interactionCreate', async (interaction) => {
 
     // Modal → quantos itens do jogo
     if (interaction.isModalSubmit() && interaction.customId.startsWith('gc_qtditens_')) {
-      const adminId = interaction.customId.split('gc_qtditens_')[1];
+      const adminId = interaction.customId.slice('gc_qtditens_'.length);
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada. Use /gencodigo novamente.', ephemeral: true });
@@ -1922,7 +1922,7 @@ client.on('interactionCreate', async (interaction) => {
 
     // Passo 2 → Categoria selecionada → listar itens
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('gc_cat_')) {
-      const adminId = interaction.customId.split('gc_cat_')[1];
+      const adminId = interaction.customId.slice('gc_cat_'.length);
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
@@ -1959,7 +1959,7 @@ client.on('interactionCreate', async (interaction) => {
 
     // Passo 2b → Item selecionado → pedir quantidade
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('gc_item_')) {
-      const adminId = interaction.customId.split('gc_item_')[1];
+      const adminId = interaction.customId.slice('gc_item_'.length);
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
@@ -1979,7 +1979,7 @@ client.on('interactionCreate', async (interaction) => {
 
     // Modal → quantidade de item do catálogo
     if (interaction.isModalSubmit() && interaction.customId.startsWith('gc_qtditem_')) {
-      const adminId = interaction.customId.split('gc_qtditem_')[1];
+      const adminId = interaction.customId.slice('gc_qtditem_'.length);
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
@@ -1993,16 +1993,24 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     // Modal → quantidade de moedas/gemas/xp
+    // customId = 'gc_qtd_ADMINID_IDX' onde ADMINID pode conter dígitos; IDX é sempre o ÚLTIMO segmento
     if (interaction.isModalSubmit() && interaction.customId.startsWith('gc_qtd_')) {
-      const parts   = interaction.customId.split('_');
-      // customId = 'gc_qtd_ADMINID_IDX' — adminId é parts[2], idx é parts[3]
-      const adminId = parts[2];
+      const semPrefixo    = interaction.customId.slice('gc_qtd_'.length);
+      const lastUnder     = semPrefixo.lastIndexOf('_');
+      const adminId       = semPrefixo.slice(0, lastUnder);
+      const idxNoCustomId = parseInt(semPrefixo.slice(lastUnder + 1));
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
       await interaction.deferUpdate();
+      // Usa o idx gravado no customId como fonte da verdade — evita dessincronização
+      sessao.tiposIdx = idxNoCustomId;
       const tipo  = sessao.tiposSelecionados[sessao.tiposIdx];
       const info  = TIPOS_RECOMPENSA[tipo];
+      if (!tipo || !info) {
+        console.error('[gc_qtd] tipo inválido idx=' + sessao.tiposIdx + ' tipos=' + JSON.stringify(sessao.tiposSelecionados));
+        return interaction.editReply({ content: '⚠️ Erro interno: tipo inválido. Use /gencodigo novamente.', components: [] });
+      }
       const valor = parseInt(interaction.fields.getTextInputValue('valor')) || 0;
       sessao.recompensas.push({ tipo, valor, quantidade: valor, label: `${info.label}: ${valor} ${info.unidade}` });
       sessao.tiposIdx++;
@@ -2010,24 +2018,34 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     // Botão "Próxima Recompensa" — abre modal após um ModalSubmit encadeado
+    // customId = 'gc_next_ADMINID_IDX' onde IDX é o último segmento
     if (interaction.isButton() && interaction.customId.startsWith('gc_next_')) {
-      const parts   = interaction.customId.split('_');
-      const adminId = parts[2];
+      const semPrefixo    = interaction.customId.slice('gc_next_'.length);
+      const lastUnder     = semPrefixo.lastIndexOf('_');
+      const adminId       = semPrefixo.slice(0, lastUnder);
+      const idxNoCustomId = parseInt(semPrefixo.slice(lastUnder + 1));
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada. Use /gencodigo novamente.', ephemeral: true });
-      const proxIdx = sessao.tiposIdx;
-      const proxTipo = sessao.tiposSelecionados[proxIdx];
+      // Sincroniza tiposIdx com o idx do botão antes de tudo
+      sessao.tiposIdx = idxNoCustomId;
+      const proxTipo = sessao.tiposSelecionados[sessao.tiposIdx];
       const info = TIPOS_RECOMPENSA[proxTipo];
-      if (!info) return interaction.reply({ content: '⚠️ Tipo inválido.', ephemeral: true });
+      if (!proxTipo || !info) {
+        console.error('[gc_next] tipo inválido idx=' + sessao.tiposIdx + ' tipos=' + JSON.stringify(sessao.tiposSelecionados));
+        return interaction.reply({ content: '⚠️ Tipo inválido. Use /gencodigo novamente.', ephemeral: true });
+      }
+      const recompListadas = sessao.recompensas.length
+        ? sessao.recompensas.map((r, i) => `${i+1}. ${r.label}`).join(' | ')
+        : '';
       const modal = new ModalBuilder()
-        .setCustomId(`gc_qtd_${adminId}_${proxIdx}`)
-        .setTitle(`Recompensa ${proxIdx + 1}/${sessao.tiposSelecionados.length}: ${info.label}`)
+        .setCustomId(`gc_qtd_${adminId}_${sessao.tiposIdx}`)
+        .setTitle(`Recompensa ${sessao.tiposIdx + 1}/${sessao.tiposSelecionados.length}: ${info.label}`)
         .addComponents(
           new ActionRowBuilder().addComponents(
             new TextInputBuilder()
               .setCustomId('valor')
-              .setLabel(`Quantidade de ${info.unidade}`)
+              .setLabel(`Quantidade de ${info.unidade}` + (recompListadas ? ` (já: ${recompListadas.slice(0,40)})` : ''))
               .setStyle(TextInputStyle.Short)
               .setRequired(true)
               .setPlaceholder('Ex: 500')
@@ -2038,7 +2056,7 @@ client.on('interactionCreate', async (interaction) => {
 
     // Botão voltar às categorias
     if (interaction.isButton() && interaction.customId.startsWith('gc_voltarcat_')) {
-      const adminId = interaction.customId.split('gc_voltarcat_')[1];
+      const adminId = interaction.customId.slice('gc_voltarcat_'.length);
       if (interaction.user.id !== adminId) return interaction.reply({ content: '🚫', ephemeral: true });
       const sessao = sessoescodigo.get(interaction.user.id);
       if (!sessao) return interaction.reply({ content: '⚠️ Sessão expirada.', ephemeral: true });
