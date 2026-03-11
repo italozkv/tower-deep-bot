@@ -1376,11 +1376,23 @@ async function registrarSlashCommands(clientId) {
 async function avancarRecompensa(interaction, sessao, adminId) {
   const proxIdx = sessao.tiposIdx;
 
+  // Helper: responde ou atualiza a mensagem dependendo do tipo de interaction
+  async function responder(payload) {
+    if (interaction.isStringSelectMenu() || interaction.isButton()) {
+      return interaction.update({ ...payload, fetchReply: false });
+    } else if (interaction.isModalSubmit()) {
+      // ModalSubmit: deferUpdate já foi chamado antes de chegar aqui, usar editReply
+      return interaction.editReply(payload);
+    } else {
+      return interaction.editReply(payload);
+    }
+  }
+
   if (proxIdx < sessao.tiposSelecionados.length) {
     const proxTipo = sessao.tiposSelecionados[proxIdx];
 
     if (proxTipo === 'item') {
-      // Item: mostrar menu de categorias (update/editReply, não modal)
+      // Item: mostrar menu de categorias
       const catalogo   = await getCatalogoCompleto();
       const categorias = [...new Set(catalogo.map(i => i.categoria))].sort();
 
@@ -1402,58 +1414,37 @@ async function avancarRecompensa(interaction, sessao, adminId) {
         ? sessao.recompensas.map((r, i) => `**${i+1}.** ${r.label}`).join('\n')
         : '*Nenhuma ainda*';
 
-      const embedCat = {
+      return responder({
         embeds: [new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA)
           .setTitle(`🎁 Recompensa ${proxIdx + 1}/${sessao.tiposSelecionados.length}`)
           .setDescription(`*Já adicionadas:*\n${recompListadas}\n\n*Selecione a categoria do próximo item:*`)],
         components: [menuCat],
-      };
-
-      // StringSelectMenu e Button usam update(); ModalSubmit usa editReply()
-      if (interaction.isStringSelectMenu() || interaction.isButton()) {
-        return interaction.update(embedCat);
-      } else {
-        return interaction.editReply(embedCat);
-      }
+      });
 
     } else {
-      // Moedas/Gemas/XP etc: abrir modal
+      // Moedas/Gemas/XP etc.
       const info = TIPOS_RECOMPENSA[proxTipo];
+      if (!info) {
+        console.error('[avancarRecompensa] tipo desconhecido:', proxTipo, 'idx:', proxIdx, 'tipos:', sessao.tiposSelecionados);
+        return responder({ content: '⚠️ Tipo de recompensa inválido. Use /gencodigo novamente.', embeds: [], components: [] });
+      }
 
       const recompListadas = sessao.recompensas.length
         ? sessao.recompensas.map((r, i) => `${i+1}. ${r.label}`).join(' | ')
         : '';
 
-      const modal = new ModalBuilder()
-        .setCustomId(`gc_qtd_${adminId}_${proxIdx}`)
-        .setTitle(`Recompensa ${proxIdx + 1}/${sessao.tiposSelecionados.length}: ${info.label}`)
-        .addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId('valor')
-              .setLabel(`Quantidade de ${info.unidade}` + (recompListadas ? ` (já: ${recompListadas.slice(0,40)})` : ''))
-              .setStyle(TextInputStyle.Short)
-              .setRequired(true)
-              .setPlaceholder('Ex: 500')
-          )
-        );
-
-      // Modal só pode ser aberto se a interaction ainda não foi respondida (não passou por defer/update)
-      // StringSelectMenu e Button: showModal direto
-      // ModalSubmit: precisa de deferUpdate primeiro, depois editReply com novo embed+botão invisível não funciona
-      // Solução: para ModalSubmit encadeado, usar uma mensagem intermediária com botão "Próxima Recompensa"
       if (interaction.isModalSubmit()) {
-        // Após modal submit, não podemos abrir outro modal diretamente.
-        // Mostramos um botão que o admin clica para abrir o próximo modal.
+        // Após qualquer ModalSubmit não podemos abrir outro modal diretamente.
+        // Mostramos botão intermediário — o admin clica e abre o modal.
+        const recompAtuais = sessao.recompensas.length
+          ? sessao.recompensas.map((r, i) => `**${i+1}.** ${r.label}`).join('\n')
+          : '*Nenhuma ainda*';
         const btnNext = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId(`gc_next_${adminId}_${proxIdx}`)
             .setLabel(`▶ Inserir Recompensa ${proxIdx + 1}: ${info.label}`)
             .setStyle(ButtonStyle.Primary)
         );
-        const recompAtuais = sessao.recompensas.length
-          ? sessao.recompensas.map((r, i) => `**${i+1}.** ${r.label}`).join('\n')
-          : '*Nenhuma ainda*';
         return interaction.editReply({
           embeds: [new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA)
             .setTitle(`🎁 Código em Progresso — ${sessao.recompensas.length}/${sessao.tiposSelecionados.length} recompensas`)
@@ -1462,6 +1453,20 @@ async function avancarRecompensa(interaction, sessao, adminId) {
         });
       }
 
+      // StringSelectMenu ou Button: podemos abrir modal diretamente
+      const modal = new ModalBuilder()
+        .setCustomId(`gc_qtd_${adminId}_${proxIdx}`)
+        .setTitle(`Recompensa ${proxIdx + 1}/${sessao.tiposSelecionados.length}: ${info.label}`.slice(0, 45))
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('valor')
+              .setLabel((`Quantidade de ${info.unidade}` + (recompListadas ? ` (já: ${recompListadas.slice(0,30)})` : '')).slice(0, 45))
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+              .setPlaceholder('Ex: 500')
+          )
+        );
       return interaction.showModal(modal);
     }
   }
@@ -2040,12 +2045,12 @@ client.on('interactionCreate', async (interaction) => {
         : '';
       const modal = new ModalBuilder()
         .setCustomId(`gc_qtd_${adminId}_${sessao.tiposIdx}`)
-        .setTitle(`Recompensa ${sessao.tiposIdx + 1}/${sessao.tiposSelecionados.length}: ${info.label}`)
+        .setTitle(`Recompensa ${sessao.tiposIdx + 1}/${sessao.tiposSelecionados.length}: ${info.label}`.slice(0, 45))
         .addComponents(
           new ActionRowBuilder().addComponents(
             new TextInputBuilder()
               .setCustomId('valor')
-              .setLabel(`Quantidade de ${info.unidade}` + (recompListadas ? ` (já: ${recompListadas.slice(0,40)})` : ''))
+              .setLabel((`Quantidade de ${info.unidade}` + (recompListadas ? ` (já: ${recompListadas.slice(0,30)})` : '')).slice(0, 45))
               .setStyle(TextInputStyle.Short)
               .setRequired(true)
               .setPlaceholder('Ex: 500')
