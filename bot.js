@@ -73,6 +73,7 @@ const client = new Client({
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessageReactions,
   ]
 });
 
@@ -604,6 +605,723 @@ async function responderTextoLongo(messageOrInteraction, texto, isReply = true) 
   for (const parte of partes) await messageOrInteraction.channel.send(parte);
 }
 
+const lembretes = new Map(); // id → dados do lembrete
+let lembretesContador = 0;
+
+/**
+ * Converte string de tempo legível para milissegundos.
+ * Formatos: 30s | 15m | 2h | 1h30m | 90m
+ */
+function parseTempo(str) {
+  const regex = /(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/i;
+  const match = str.trim().match(regex);
+  if (!match || (!match[1] && !match[2] && !match[3])) return null;
+
+  const horas    = parseInt(match[1] || 0);
+  const minutos  = parseInt(match[2] || 0);
+  const segundos = parseInt(match[3] || 0);
+  const total    = (horas * 3600 + minutos * 60 + segundos) * 1000;
+
+  return total > 0 ? total : null;
+}
+
+/** Formata milissegundos em texto legível (ex: "1h 30m") */
+function formatarTempo(ms) {
+  const totalSeg = Math.floor(ms / 1000);
+  const h = Math.floor(totalSeg / 3600);
+  const m = Math.floor((totalSeg % 3600) / 60);
+  const s = totalSeg % 60;
+  const partes = [];
+  if (h) partes.push(`${h}h`);
+  if (m) partes.push(`${m}m`);
+  if (s && !h) partes.push(`${s}s`); // só mostra segundos se for menos de 1h
+  return partes.join(' ') || '0s';
+}
+
+async function criarLembrete(interaction) {
+  const tempoStr  = interaction.options.getString('tempo');
+  const mensagem  = interaction.options.getString('mensagem');
+  const ms        = parseTempo(tempoStr);
+
+  if (!ms) {
+    return interaction.reply({
+      content: '⚠️ *Formato de tempo inválido, mortal.*\nUse: `30s`, `15m`, `2h`, `1h30m`',
+      ephemeral: true,
+    });
+  }
+
+  // Limite: máximo 24 horas
+  if (ms > 24 * 60 * 60 * 1000) {
+    return interaction.reply({
+      content: '⚠️ *Os deuses não permitem lembretes maiores que 24 horas.*',
+      ephemeral: true,
+    });
+  }
+
+  const id        = `LMB-${++lembretesContador}`;
+  const expiraEm  = Date.now() + ms;
+  const expiraTs  = Math.floor(expiraEm / 1000);
+
+  const timeout = setTimeout(async () => {
+    lembretes.delete(id);
+    try {
+      const user = await client.users.fetch(interaction.user.id);
+      const embed = new EmbedBuilder()
+        .setColor(CONFIG.CORES.AVISO)
+        .setTitle('⏰ LEMBRETE DO OLIMPO')
+        .setDescription(`*Os deuses do Olimpo te convocam, mortal!*\n\n📌 **${mensagem}**`)
+        .addFields({ name: '⏱️ Lembrete criado em', value: `<t:${Math.floor((expiraEm - ms) / 1000)}:F>` })
+        .setFooter({ text: 'Tower Deep · Sistema de Lembretes' })
+        .setTimestamp();
+
+      await user.send({ embeds: [embed] });
+    } catch {
+      // DMs bloqueadas — tenta no canal original se ainda existir
+      try {
+        const canal = await client.channels.fetch(interaction.channelId);
+        if (canal?.isTextBased()) {
+          await canal.send({ content: `<@${interaction.user.id}> ⏰ **Lembrete:** ${mensagem}` });
+        }
+      } catch { /* canal deletado */ }
+    }
+  }, ms);
+
+  lembretes.set(id, {
+    id,
+    userId:    interaction.user.id,
+    mensagem,
+    expiraEm,
+    criadoEm:  Date.now(),
+    channelId: interaction.channelId,
+    timeout,   // referência para cancelamento
+  });
+
+  const embed = new EmbedBuilder()
+    .setColor(CONFIG.CORES.SUCESSO)
+    .setTitle('⏰ Lembrete Agendado!')
+    .setDescription(`*Os deuses do Olimpo guardarão tua memória, mortal.*\n\n📌 **${mensagem}**`)
+    .addFields(
+      { name: '⏱️ Tempo',       value: formatarTempo(ms),           inline: true },
+      { name: '🔔 Aviso em',    value: `<t:${expiraTs}:R>`,         inline: true },
+      { name: '📅 Horário',     value: `<t:${expiraTs}:F>`,         inline: true },
+    )
+    .setFooter({ text: `ID: ${id} · Você receberá uma DM` })
+    .setTimestamp();
+
+  return interaction.reply({ embeds: [embed], ephemeral: true });
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// [3] SISTEMA DE SORTEIOS — cole antes da seção "SISTEMA DE TOKENS"
+// ─────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────
+// SISTEMA DE SORTEIOS
+// ─────────────────────────────────────────────────────────────────────────
+const sorteiosAtivos  = new Map(); // id → dados do sorteio
+let sorteioContador   = 0;
+
+const EMOJI_SORTEIO = '🎉';
+
+/** Escolhe N vencedores únicos de uma lista de IDs de participantes */
+function sortearVencedores(participantes, qtd) {
+  const lista   = [...participantes];
+  const vencedores = [];
+  while (vencedores.length < qtd && lista.length > 0) {
+    const idx = Math.floor(Math.random() * lista.length);
+    vencedores.push(lista.splice(idx, 1)[0]);
+  }
+  return vencedores;
+}
+
+/** Monta o embed do sorteio em andamento */
+function embedSorteioAtivo(sorteio) {
+  const expiraTs = Math.floor(sorteio.expiraEm / 1000);
+  const totalP   = sorteio.participantes.length;
+
+  return new EmbedBuilder()
+    .setColor(CONFIG.CORES.PRIMARIA)
+    .setTitle(`${EMOJI_SORTEIO} SORTEIO — ${sorteio.premio}`)
+    .setDescription(
+      `*Os deuses do Olimpo convidam os mortais para este concurso divino!*\n\n` +
+      `Reaja com ${EMOJI_SORTEIO} abaixo para participar!`
+    )
+    .addFields(
+      { name: '🏆 Prêmio',      value: sorteio.premio,                       inline: true  },
+      { name: '🎖️ Vencedores',  value: `${sorteio.qtdVencedores}`,           inline: true  },
+      { name: '👥 Participantes',value: `${totalP}`,                          inline: true  },
+      { name: '⏰ Encerra em',   value: `<t:${expiraTs}:R>`,                  inline: true  },
+      { name: '📅 Data/Hora',    value: `<t:${expiraTs}:F>`,                  inline: true  },
+      { name: '🆔 ID',           value: `\`${sorteio.id}\``,                  inline: true  },
+      ...(sorteio.requisitoCargo ? [{ name: '🎭 Requisito', value: `<@&${sorteio.requisitoCargo}>`, inline: false }] : []),
+    )
+    .setFooter({ text: `Tower Deep · Sorteio #${sorteio.id}` })
+    .setTimestamp();
+}
+
+/** Encerra o sorteio, sorteia vencedores e atualiza a mensagem */
+async function encerrarSorteio(sorteio, motivo = 'tempo') {
+  // Remove timer automático se ainda existir
+  if (sorteio.timeout) {
+    clearTimeout(sorteio.timeout);
+    sorteio.timeout = null;
+  }
+
+  sorteio.status     = 'encerrado';
+  sorteio.encerradoEm = Date.now();
+
+  const canal = await client.channels.fetch(sorteio.channelId).catch(() => null);
+  if (!canal) { sorteiosAtivos.delete(sorteio.id); return; }
+
+  // Busca reações reais da mensagem para garantir precisão
+  let participantesFinais = [...sorteio.participantes];
+  try {
+    const msg       = await canal.messages.fetch(sorteio.messageId);
+    const reaction  = msg.reactions.cache.get(EMOJI_SORTEIO);
+    if (reaction) {
+      const users = await reaction.users.fetch();
+      // Filtra bots e aplica requisito de cargo se houver
+      const guild = canal.guild;
+      for (const [uid] of users) {
+        if (uid === client.user.id) continue;
+        if (sorteio.requisitoCargo) {
+          const member = await guild.members.fetch(uid).catch(() => null);
+          if (!member?.roles.cache.has(sorteio.requisitoCargo)) continue;
+        }
+        if (!participantesFinais.includes(uid)) participantesFinais.push(uid);
+      }
+    }
+  } catch { /* Usa lista interna como fallback */ }
+
+  sorteio.participantes = participantesFinais;
+
+  // Sorteia vencedores
+  if (participantesFinais.length === 0) {
+    sorteiosAtivos.delete(sorteio.id);
+
+    const embedSemParticipantes = new EmbedBuilder()
+      .setColor(CONFIG.CORES.NEUTRO)
+      .setTitle(`😔 SORTEIO ENCERRADO — ${sorteio.premio}`)
+      .setDescription('*Nenhum mortal participou deste sorteio...\nOs deuses guardam o prêmio para outra oportunidade.*')
+      .setTimestamp();
+
+    try {
+      const msg = await canal.messages.fetch(sorteio.messageId);
+      await msg.edit({ embeds: [embedSemParticipantes], components: [] });
+    } catch { await canal.send({ embeds: [embedSemParticipantes] }); }
+    return;
+  }
+
+  const vencedores      = sortearVencedores(participantesFinais, Math.min(sorteio.qtdVencedores, participantesFinais.length));
+  sorteio.vencedores    = vencedores;
+  const mencoes         = vencedores.map(id => `<@${id}>`).join(', ');
+  const expiraTs        = Math.floor(sorteio.criadoEm / 1000);
+
+  const embedEncerrado = new EmbedBuilder()
+    .setColor(CONFIG.CORES.AVISO)
+    .setTitle(`🏆 SORTEIO ENCERRADO — ${sorteio.premio}`)
+    .setDescription(
+      `*Os deuses do Olimpo decidiram!\n\nOs escolhidos para carregar o prêmio são:*\n\n` +
+      `✨ **${mencoes}** ✨`
+    )
+    .addFields(
+      { name: '🏆 Prêmio',       value: sorteio.premio,                      inline: true  },
+      { name: '👥 Participantes', value: `${participantesFinais.length}`,     inline: true  },
+      { name: '🆔 ID',            value: `\`${sorteio.id}\``,                 inline: true  },
+      { name: '📅 Criado em',     value: `<t:${expiraTs}:F>`,                 inline: true  },
+    )
+    .setFooter({ text: `Tower Deep · Use /sorteio resorteio ${sorteio.id} se necessário` })
+    .setTimestamp();
+
+  // Atualiza mensagem original
+  try {
+    const msg = await canal.messages.fetch(sorteio.messageId);
+    await msg.edit({ embeds: [embedEncerrado], components: [] });
+  } catch { /* mensagem pode ter sido deletada */ }
+
+  // Anuncia vencedores no canal
+  await canal.send({
+    content: `🎉 **PARABÉNS** ${mencoes}! **Vocês venceram o sorteio de ${sorteio.premio}!** 🎉\n*Entrem em contato com a equipe para resgatar o prêmio.*`,
+  });
+
+  // Grava no log de tickets se configurado
+  if (CONFIG.CANAL_LOG_TICKETS) {
+    try {
+      const canalLog = await client.channels.fetch(CONFIG.CANAL_LOG_TICKETS);
+      if (canalLog?.isTextBased()) {
+        await canalLog.send({
+          embeds: [new EmbedBuilder()
+            .setColor(CONFIG.CORES.AVISO)
+            .setTitle('🎉 Sorteio Encerrado')
+            .addFields(
+              { name: '🏆 Prêmio',       value: sorteio.premio,              inline: true  },
+              { name: '👥 Participantes', value: `${participantesFinais.length}`, inline: true },
+              { name: '🏅 Vencedor(es)',  value: mencoes,                     inline: false },
+            )
+            .setTimestamp()],
+        });
+      }
+    } catch { /* log não crítico */ }
+  }
+
+  sorteiosAtivos.delete(sorteio.id);
+}
+
+/** Handler principal de /sorteio */
+async function handleSorteio(interaction) {
+  const sub = interaction.options.getSubcommand();
+
+  // ── CRIAR ──────────────────────────────────────────────────
+  if (sub === 'criar') {
+    if (!temPermissaoModeracao(interaction)) {
+      return interaction.reply({ content: '🚫 *Apenas guardiões do Olimpo podem proclamar sorteios.*', ephemeral: true });
+    }
+
+    const premio         = interaction.options.getString('premio');
+    const duracaoMin     = interaction.options.getInteger('duracao');
+    const qtdVencedores  = interaction.options.getInteger('vencedores') || 1;
+    const requisitoCargo = interaction.options.getString('requisito') || null;
+    const ms             = duracaoMin * 60 * 1000;
+
+    await interaction.deferReply({ ephemeral: true });
+
+    const id      = `S${++sorteioContador}`;
+    const agora   = Date.now();
+    const expiraEm = agora + ms;
+
+    const sorteio = {
+      id,
+      premio,
+      qtdVencedores,
+      requisitoCargo,
+      channelId:     interaction.channelId,
+      guildId:       interaction.guildId,
+      criadoPor:     interaction.user.id,
+      criadoEm:      agora,
+      expiraEm,
+      participantes: [],
+      status:        'ativo',
+      messageId:     null,
+      timeout:       null,
+      vencedores:    [],
+    };
+
+    // Envia mensagem do sorteio no canal
+    const msg = await interaction.channel.send({
+      content: `@everyone`,
+      embeds:  [embedSorteioAtivo(sorteio)],
+    });
+
+    // Adiciona reação inicial
+    await msg.react(EMOJI_SORTEIO);
+    sorteio.messageId = msg.id;
+
+    // Agenda encerramento automático
+    sorteio.timeout = setTimeout(() => encerrarSorteio(sorteio, 'tempo'), ms);
+    sorteiosAtivos.set(id, sorteio);
+
+    const expiraTs = Math.floor(expiraEm / 1000);
+    return interaction.editReply({
+      content: `✅ *Sorteio proclamado!*\n🆔 **ID:** \`${id}\`\n⏰ **Encerra:** <t:${expiraTs}:R>\n\n*Use \`/sorteio encerrar ${id}\` para encerrar antes do tempo.*`,
+    });
+  }
+
+  // ── ENCERRAR ───────────────────────────────────────────────
+  if (sub === 'encerrar') {
+    if (!temPermissaoModeracao(interaction)) {
+      return interaction.reply({ content: '🚫 *Apenas guardiões podem encerrar sorteios.*', ephemeral: true });
+    }
+
+    const id      = interaction.options.getString('id').toUpperCase();
+    const sorteio = sorteiosAtivos.get(id);
+    if (!sorteio) return interaction.reply({ content: `⚠️ *Sorteio \`${id}\` não encontrado ou já encerrado.*`, ephemeral: true });
+
+    await interaction.deferReply({ ephemeral: true });
+    await encerrarSorteio(sorteio, 'manual');
+    return interaction.editReply({ content: `⚔️ *Sorteio \`${id}\` encerrado pelo guardião!*` });
+  }
+
+  // ── CANCELAR ───────────────────────────────────────────────
+  if (sub === 'cancelar') {
+    if (!temPermissaoModeracao(interaction)) {
+      return interaction.reply({ content: '🚫 *Apenas guardiões podem cancelar sorteios.*', ephemeral: true });
+    }
+
+    const id      = interaction.options.getString('id').toUpperCase();
+    const sorteio = sorteiosAtivos.get(id);
+    if (!sorteio) return interaction.reply({ content: `⚠️ *Sorteio \`${id}\` não encontrado ou já encerrado.*`, ephemeral: true });
+
+    clearTimeout(sorteio.timeout);
+    sorteiosAtivos.delete(id);
+
+    try {
+      const canal = await client.channels.fetch(sorteio.channelId);
+      const msg   = await canal.messages.fetch(sorteio.messageId);
+      const embedCancelado = new EmbedBuilder()
+        .setColor(CONFIG.CORES.ERRO)
+        .setTitle(`🚫 SORTEIO CANCELADO — ${sorteio.premio}`)
+        .setDescription('*Os deuses retiraram este concurso dos mortais.*')
+        .setTimestamp();
+      await msg.edit({ embeds: [embedCancelado], components: [] });
+    } catch { /* mensagem pode ter sido deletada */ }
+
+    return interaction.reply({ content: `🗑️ *Sorteio \`${id}\` cancelado.* Nenhum vencedor foi sorteado.`, ephemeral: true });
+  }
+
+  // ── LISTAR ─────────────────────────────────────────────────
+  if (sub === 'listar') {
+    if (!sorteiosAtivos.size) {
+      return interaction.reply({ content: '📜 *Nenhum sorteio ativo no momento, mortal.*', ephemeral: true });
+    }
+
+    const lista = [...sorteiosAtivos.values()].map(s => {
+      const expiraTs = Math.floor(s.expiraEm / 1000);
+      return `🎉 \`${s.id}\` — **${s.premio}** — ${s.participantes.length} participante(s) — encerra <t:${expiraTs}:R>`;
+    }).join('\n');
+
+    return interaction.reply({
+      embeds: [new EmbedBuilder()
+        .setColor(CONFIG.CORES.INFO)
+        .setTitle('🎉 Sorteios Ativos')
+        .setDescription(lista)
+        .setFooter({ text: `${sorteiosAtivos.size} sorteio(s) em andamento` })],
+      ephemeral: true,
+    });
+  }
+
+  // ── RESORTEIO ──────────────────────────────────────────────
+  if (sub === 'resorteio') {
+    if (!temPermissaoModeracao(interaction)) {
+      return interaction.reply({ content: '🚫 *Apenas guardiões podem fazer resorteios.*', ephemeral: true });
+    }
+
+    const id = interaction.options.getString('id').toUpperCase();
+    // Resorteio requer dados do sorteio encerrado — mantemos cache temporário
+    // Você pode expandir isso persistindo os sorteios encerrados em Gist se necessário
+    return interaction.reply({
+      content: `⚠️ *Para resorteio do sorteio \`${id}\`, use \`/sorteio criar\` com os mesmos dados.*\n*Resorteio automático requer persistência — funcionalidade disponível em atualização futura.*`,
+      ephemeral: true,
+    });
+  }
+}
+
+// ── Listener de reações para participar do sorteio ──────────
+// Adicione dentro de client.on('messageReactionAdd', ...) — ver instrução abaixo
+async function handleReacaoSorteio(reaction, user) {
+  if (user.bot) return;
+  if (reaction.emoji.name !== EMOJI_SORTEIO) return;
+
+  for (const [, sorteio] of sorteiosAtivos) {
+    if (sorteio.messageId === reaction.message.id && sorteio.status === 'ativo') {
+      // Verifica requisito de cargo
+      if (sorteio.requisitoCargo) {
+        const guild  = reaction.message.guild;
+        const member = await guild.members.fetch(user.id).catch(() => null);
+        if (!member?.roles.cache.has(sorteio.requisitoCargo)) {
+          await reaction.users.remove(user.id).catch(() => {});
+          try { await user.send(`⚠️ *Mortal, para participar deste sorteio do Olimpo precisas do cargo <@&${sorteio.requisitoCargo}>.*`); } catch {}
+          return;
+        }
+      }
+
+      if (!sorteio.participantes.includes(user.id)) {
+        sorteio.participantes.push(user.id);
+
+        // Atualiza embed com novo contador de participantes (debounce simples)
+        clearTimeout(sorteio._updateTimeout);
+        sorteio._updateTimeout = setTimeout(async () => {
+          try {
+            const msg = await reaction.message.fetch();
+            await msg.edit({ embeds: [embedSorteioAtivo(sorteio)] });
+          } catch { /* embed pode ter expirado */ }
+        }, 3000); // aguarda 3s antes de editar (evita flood de edições)
+      }
+      break;
+    }
+  }
+}
+
+// ── Listener de remoção de reação ────────────────────────────
+async function handleReacaoRemovidaSorteio(reaction, user) {
+  if (user.bot) return;
+  if (reaction.emoji.name !== EMOJI_SORTEIO) return;
+
+  for (const [, sorteio] of sorteiosAtivos) {
+    if (sorteio.messageId === reaction.message.id && sorteio.status === 'ativo') {
+      sorteio.participantes = sorteio.participantes.filter(id => id !== user.id);
+      break;
+    }
+  }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// [4] SISTEMA DE PERFIL (/perfil) — cole antes da seção "SISTEMA DE TOKENS"
+// ─────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────
+// COMANDO /perfil
+// ─────────────────────────────────────────────────────────────────────────
+async function handlePerfil(interaction) {
+  const alvo   = interaction.options.getUser('usuario') || interaction.user;
+  const userId = alvo.id;
+
+  await interaction.deferReply();
+
+  // XP e nível
+  if (!xpData.has(userId)) xpData.set(userId, { xp: 0, nivel: 1, msgs: 0, username: alvo.username, lastMsg: 0 });
+  const dados  = xpData.get(userId);
+  const nivel  = getNivel(dados.xp);
+  const proximo = getProximoNivel(dados.xp);
+
+  // Progresso até próximo nível
+  const xpAtualNivel = dados.xp - nivel.xpMin;
+  const xpNecessario = proximo ? proximo.xpMin - nivel.xpMin : 1;
+  const barra        = proximo ? gerarBarraProgresso(xpAtualNivel, xpNecessario, 14) : '██████████████ MAX';
+  const faltam       = proximo ? proximo.xpMin - dados.xp : 0;
+
+  // Posição no ranking global
+  const ranking  = [...xpData.entries()].sort((a, b) => b[1].xp - a[1].xp);
+  const posicao  = ranking.findIndex(([id]) => id === userId) + 1;
+  const medalha  = posicao === 1 ? '👑' : posicao === 2 ? '🥈' : posicao === 3 ? '🥉' : `#${posicao}`;
+
+  // Conta Roblox vinculada
+  let robloxInfo = '*Não vinculada*';
+  let robloxAvatar = null;
+  try {
+    const db      = await lerVinculos();
+    const vinculo = db.vinculos.find(v => v.discordId === userId);
+    if (vinculo) {
+      robloxInfo   = `**${vinculo.robloxName}** (\`${vinculo.robloxId}\`)`;
+      robloxAvatar = `https://www.roblox.com/headshot-thumbnail/image?userId=${vinculo.robloxId}&width=420&height=420&format=png`;
+
+      // Conta quantos códigos o jogador resgatou
+      const dbCodigos = await lerCodigos();
+      const codsResgatados = dbCodigos.codigos.filter(c =>
+        c.usadoPor?.some(u => u.robloxId === vinculo.robloxId)
+      ).length;
+      robloxInfo += `\n🎁 ${codsResgatados} código(s) resgatado(s)`;
+    }
+  } catch { /* não bloqueia o comando */ }
+
+  // Tickets abertos pelo usuário
+  const ticketCount = [...ticketsAtivos.values()].filter(t => t.userId === userId).length;
+
+  // Data de entrada no servidor
+  let entradaTs = '';
+  try {
+    const member = await interaction.guild.members.fetch(userId);
+    const ts     = Math.floor(member.joinedTimestamp / 1000);
+    entradaTs    = `<t:${ts}:D>`;
+    dados.username = member.displayName || alvo.username; // atualiza nome
+  } catch { entradaTs = '*Desconhecida*'; }
+
+  // Badge de título especial (para membros da equipe)
+  let badgeEquipe = '';
+  try {
+    const member = await interaction.guild.members.fetch(userId);
+    if (ehDono(member))   badgeEquipe = '👑 Dono do Olimpo';
+    else if (ehAdmin(member))  badgeEquipe = '🔱 Administrador';
+    else if (ehMod(member))    badgeEquipe = '⚔️ Moderador';
+    else if (ehEquipe(member)) badgeEquipe = '🛡️ Membro da Equipe';
+  } catch {}
+
+  const embed = new EmbedBuilder()
+    .setColor(CONFIG.CORES.PRIMARIA)
+    .setTitle(`🃏 PERGAMINHO DIVINO — ${alvo.username}`)
+    .setThumbnail(alvo.displayAvatarURL({ dynamic: true, size: 256 }))
+    .setDescription(
+      (badgeEquipe ? `*${badgeEquipe}*\n` : '') +
+      `*"${nivel.nome}"*\n\n` +
+      `> Mortal registrado nas cartas do Olimpo.`
+    )
+    .addFields(
+      // Linha 1: XP e Nível
+      { name: '⚡ XP Total',      value: `${dados.xp.toLocaleString('pt-BR')}`,  inline: true },
+      { name: '📊 Nível',         value: `${nivel.nivel}/10`,                    inline: true },
+      { name: '🏅 Ranking',       value: medalha,                                inline: true },
+
+      // Linha 2: Progresso
+      { name: '📈 Progresso para o próximo título',
+        value: `\`[${barra}]\`\n${proximo ? `*${faltam} XP para ${proximo.nome}*` : '*✨ Divindade máxima atingida!*'}`,
+        inline: false },
+
+      // Linha 3: Atividade
+      { name: '💬 Mensagens',     value: `${(dados.msgs || 0).toLocaleString('pt-BR')}`,  inline: true },
+      { name: '🎫 Tickets',       value: `${ticketCount}`,                                inline: true },
+      { name: '📅 Entrou em',     value: entradaTs,                                       inline: true },
+
+      // Linha 4: Roblox
+      { name: '🎮 Conta Roblox',  value: robloxInfo,                             inline: false },
+    )
+    .setFooter({ text: `Tower Deep · ID: ${userId}` })
+    .setTimestamp();
+
+  // Se tiver avatar do Roblox, usa como thumbnail extra
+  if (robloxAvatar) embed.setImage(robloxAvatar);
+
+  return interaction.editReply({ embeds: [embed] });
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// [5] COMANDO /stats — cole antes da seção "SISTEMA DE TOKENS"
+// ─────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────
+// COMANDO /stats
+// ─────────────────────────────────────────────────────────────────────────
+async function handleStats(interaction) {
+  const sub = interaction.options.getSubcommand();
+  await interaction.deferReply();
+
+  if (sub === 'servidor') {
+    const guild = interaction.guild;
+
+    // Coleta dados do servidor
+    await guild.members.fetch(); // garante cache atualizado
+    const totalMembros  = guild.memberCount;
+    const membrosOnline = guild.members.cache.filter(m => m.presence?.status !== 'offline' && !m.user.bot).size;
+    const totalBots     = guild.members.cache.filter(m => m.user.bot).size;
+    const totalCanais   = guild.channels.cache.filter(c => c.type === ChannelType.GuildText).size;
+    const totalVoice    = guild.channels.cache.filter(c => c.type === ChannelType.GuildVoice).size;
+
+    // Estatísticas de XP
+    const totalXP       = [...xpData.values()].reduce((acc, d) => acc + d.xp, 0);
+    const totalMsgs     = [...xpData.values()].reduce((acc, d) => acc + (d.msgs || 0), 0);
+    const jogadoresReg  = xpData.size;
+
+    // Top 3 jogadores
+    const top3 = [...xpData.entries()]
+      .sort((a, b) => b[1].xp - a[1].xp)
+      .slice(0, 3)
+      .map(([id, d], i) => {
+        const medalhas = ['🥇', '🥈', '🥉'];
+        const n = getNivel(d.xp);
+        return `${medalhas[i]} <@${id}> — **${n.nome}** *(${d.xp} XP)*`;
+      }).join('\n') || '*Nenhum ainda*';
+
+    // Tickets
+    const ticketsAbertos    = [...ticketsAtivos.values()].filter(t => t.status === 'aberto').length;
+    const ticketsResolvidos = [...ticketsAtivos.values()].filter(t => t.status === 'resolvido').length;
+
+    // Sorteios ativos
+    const sorteiosEmAndamento = sorteiosAtivos.size;
+
+    // Uptime do bot
+    const uptimeSeg = Math.floor(process.uptime());
+    const uptimeH   = Math.floor(uptimeSeg / 3600);
+    const uptimeM   = Math.floor((uptimeSeg % 3600) / 60);
+    const uptimeStr = `${uptimeH}h ${uptimeM}m`;
+
+    const embed = new EmbedBuilder()
+      .setColor(CONFIG.CORES.INFO)
+      .setTitle('📊 ESTATÍSTICAS DO OLIMPO')
+      .setThumbnail(guild.iconURL({ dynamic: true }))
+      .setDescription('*Os oráculos revelam os dados do reino...*')
+      .addFields(
+        // Servidor
+        { name: '🏛️ Servidor',       value: '━━━━━━━━━━━━━━━',                  inline: false },
+        { name: '👥 Membros',         value: `${totalMembros}`,                  inline: true  },
+        { name: '🟢 Online agora',    value: `${membrosOnline}`,                 inline: true  },
+        { name: '🤖 Bots',            value: `${totalBots}`,                     inline: true  },
+        { name: '💬 Canais de texto', value: `${totalCanais}`,                   inline: true  },
+        { name: '🔊 Canais de voz',   value: `${totalVoice}`,                    inline: true  },
+        { name: '⏰ Uptime do bot',    value: uptimeStr,                         inline: true  },
+
+        // Atividade
+        { name: '⚡ Atividade',        value: '━━━━━━━━━━━━━━━',                  inline: false },
+        { name: '👤 Jogadores reg.',   value: `${jogadoresReg}`,                  inline: true  },
+        { name: '📩 Total mensagens',  value: `${totalMsgs.toLocaleString('pt-BR')}`, inline: true },
+        { name: '✨ XP Total acumulado',value: `${totalXP.toLocaleString('pt-BR')}`,  inline: true },
+
+        // Top jogadores
+        { name: '🏆 Top 3 — Olimpo',  value: top3,                              inline: false },
+
+        // Sistema
+        { name: '🎫 Tickets',          value: '━━━━━━━━━━━━━━━',                 inline: false },
+        { name: '📂 Abertos',          value: `${ticketsAbertos}`,               inline: true  },
+        { name: '✅ Resolvidos',        value: `${ticketsResolvidos}`,            inline: true  },
+        { name: '🎉 Sorteios ativos',  value: `${sorteiosEmAndamento}`,          inline: true  },
+      )
+      .setFooter({ text: `Tower Deep · Atualizado em` })
+      .setTimestamp();
+
+    return interaction.editReply({ embeds: [embed] });
+  }
+
+  if (sub === 'jogador') {
+    const alvo   = interaction.options.getUser('usuario') || interaction.user;
+    const userId = alvo.id;
+
+    if (!xpData.has(userId)) {
+      return interaction.editReply({ content: `⚠️ *${alvo.username} ainda não possui atividade registrada no Olimpo.*` });
+    }
+
+    const dados  = xpData.get(userId);
+    const nivel  = getNivel(dados.xp);
+    const proximo = getProximoNivel(dados.xp);
+    const ranking = [...xpData.entries()].sort((a, b) => b[1].xp - a[1].xp);
+    const posicao = ranking.findIndex(([id]) => id === userId) + 1;
+
+    // Conta acima e abaixo no ranking
+    const acima   = posicao > 1 ? ranking[posicao - 2] : null;
+    const abaixo  = posicao < ranking.length ? ranking[posicao] : null;
+
+    const barra        = proximo
+      ? gerarBarraProgresso(dados.xp - nivel.xpMin, proximo.xpMin - nivel.xpMin, 14)
+      : '██████████████ MAX';
+
+    // Conta Roblox
+    let robloxStr = '*Não vinculada*';
+    let codsResgatados = 0;
+    try {
+      const db      = await lerVinculos();
+      const vinculo = db.vinculos.find(v => v.discordId === userId);
+      if (vinculo) {
+        robloxStr = `${vinculo.robloxName} (\`${vinculo.robloxId}\`)`;
+        const dbCodigos = await lerCodigos();
+        codsResgatados  = dbCodigos.codigos.filter(c =>
+          c.usadoPor?.some(u => u.robloxId === vinculo.robloxId)
+        ).length;
+      }
+    } catch {}
+
+    // Ritmo de mensagens (XP/mensagem médio)
+    const xpPorMsg = dados.msgs > 0 ? (dados.xp / dados.msgs).toFixed(1) : '—';
+
+    const embed = new EmbedBuilder()
+      .setColor(CONFIG.CORES.INFO)
+      .setTitle(`📊 ESTATÍSTICAS — ${alvo.username}`)
+      .setThumbnail(alvo.displayAvatarURL({ dynamic: true }))
+      .addFields(
+        { name: '🏛️ Título',          value: nivel.nome,                         inline: true  },
+        { name: '📊 Nível',            value: `${nivel.nivel}/10`,                inline: true  },
+        { name: '🏅 Ranking',          value: `#${posicao} de ${ranking.length}`, inline: true  },
+
+        { name: '⚡ XP Total',         value: `${dados.xp.toLocaleString('pt-BR')}`,      inline: true  },
+        { name: '💬 Mensagens',        value: `${(dados.msgs||0).toLocaleString('pt-BR')}`, inline: true  },
+        { name: '📈 XP médio/msg',     value: xpPorMsg,                           inline: true  },
+
+        { name: '📈 Progresso',
+          value: `\`[${barra}]\`\n${proximo ? `*Faltam ${proximo.xpMin - dados.xp} XP para ${proximo.nome}*` : '*✨ Nível máximo!*'}`,
+          inline: false },
+
+        ...(acima ? [{ name: '⬆️ À frente no ranking', value: `<@${acima[0]}> — ${acima[1].xp} XP`, inline: true }] : []),
+        ...(abaixo ? [{ name: '⬇️ Atrás no ranking',   value: `<@${abaixo[0]}> — ${abaixo[1].xp} XP`, inline: true }] : []),
+
+        { name: '🎮 Conta Roblox',     value: robloxStr,                          inline: false },
+        { name: '🎁 Códigos resgatados', value: `${codsResgatados}`,              inline: true  },
+      )
+      .setFooter({ text: `Tower Deep · ID: ${userId}` })
+      .setTimestamp();
+
+    return interaction.editReply({ embeds: [embed] });
+  }
+}
+
+
 // ─────────────────────────────────────────────────────────────
 // SISTEMA DE TOKENS
 // ─────────────────────────────────────────────────────────────
@@ -621,45 +1339,8 @@ const PERMISSOES = {
   equipe:    ['wiki.view_exclusivo'],
 };
 
-const tokensAtivos     = new Map();
+const tokensAtivos    = new Map();
 const TOKEN_DURACAO_MS = 60 * 60 * 1000;
-
-// ── Persistência de tokens em arquivo (sobrevive a restarts do Railway) ───────
-const TOKENS_FILE = path.join(__dirname, 'tokens_ativos.json');
-
-function salvarTokensEmDisco() {
-  try {
-    const obj = {};
-    for (const [tk, dados] of tokensAtivos) obj[tk] = dados;
-    fs.writeFileSync(TOKENS_FILE, JSON.stringify(obj, null, 2), 'utf8');
-  } catch (e) {
-    console.error('⚠️ Erro ao salvar tokens em disco:', e.message);
-  }
-}
-
-function carregarTokensDoDiscoCom() {
-  try {
-    if (!fs.existsSync(TOKENS_FILE)) return;
-    const raw  = fs.readFileSync(TOKENS_FILE, 'utf8');
-    const obj  = JSON.parse(raw);
-    const agora = Date.now();
-    let carregados = 0;
-    for (const [tk, dados] of Object.entries(obj)) {
-      if (dados.expira > agora) {          // só carrega tokens ainda válidos
-        tokensAtivos.set(tk, dados);
-        carregados++;
-      }
-    }
-    if (carregados > 0) console.log(`🔑 ${carregados} token(s) restaurado(s) do disco.`);
-    // Re-salva já sem os expirados
-    salvarTokensEmDisco();
-  } catch (e) {
-    console.error('⚠️ Erro ao carregar tokens do disco:', e.message);
-  }
-}
-
-// Carrega tokens persistidos ao iniciar (antes do bot conectar)
-carregarTokensDoDiscoCom();
 
 function gerarToken() {
   const chars = 'abcdef0123456789';
@@ -678,11 +1359,9 @@ function detectarNivelToken(member) {
 
 setInterval(() => {
   const agora = Date.now();
-  let removidos = 0;
   for (const [tk, dados] of tokensAtivos) {
-    if (dados.expira < agora) { tokensAtivos.delete(tk); removidos++; }
+    if (dados.expira < agora) tokensAtivos.delete(tk);
   }
-  if (removidos > 0) salvarTokensEmDisco();
 }, 5 * 60 * 1000);
 
 async function handleToken(message) {
@@ -703,7 +1382,6 @@ async function handleToken(message) {
     nivel: nivelDef.nivel, userId: message.author.id, username: message.author.username,
     expira, criadoEm: Date.now(),
   });
-  salvarTokensEmDisco(); // persiste no disco imediatamente
   const expiraStr = new Date(expira).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   const perms     = PERMISSOES[nivelDef.nivel] || [];
   try {
@@ -764,7 +1442,6 @@ async function handleRevogar(message, args) {
   for (const [tk, dados] of tokensAtivos) {
     if (dados.userId === userId) { tokensAtivos.delete(tk); revogados++; }
   }
-  if (revogados > 0) salvarTokensEmDisco();
   return message.reply(revogados > 0 ? `✅ Token revogado para <@${userId}>.` : `⚠️ Nenhum token ativo encontrado para <@${userId}>.`);
 }
 
@@ -785,7 +1462,7 @@ const servidor = http.createServer((req, res) => {
         const { token } = JSON.parse(body);
         const dados     = tokensAtivos.get(token);
         if (!dados || dados.expira < Date.now()) {
-          if (dados) { tokensAtivos.delete(token); salvarTokensEmDisco(); }
+          if (dados) tokensAtivos.delete(token);
           res.writeHead(401, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ ok: false, erro: 'Token inválido ou expirado.' }));
         }
@@ -825,7 +1502,6 @@ const servidor = http.createServer((req, res) => {
         const { token } = JSON.parse(body);
         const existed = tokensAtivos.has(token);
         tokensAtivos.delete(token);
-        if (existed) salvarTokensEmDisco();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, revogado: existed }));
       } catch {
@@ -839,7 +1515,6 @@ const servidor = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/revogar-todos') {
     const total = tokensAtivos.size;
     tokensAtivos.clear();
-    salvarTokensEmDisco();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true, total }));
   }
@@ -850,7 +1525,6 @@ const servidor = http.createServer((req, res) => {
     for (const [token, dados] of tokensAtivos.entries()) {
       if (dados.expira < agora) { tokensAtivos.delete(token); removidos++; }
     }
-    if (removidos > 0) salvarTokensEmDisco();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true, removidos }));
   }
@@ -1404,6 +2078,47 @@ const slashCommands = [
   new SlashCommandBuilder().setName('minhaconta').setDescription('👤 Ver sua conta Roblox vinculada e códigos resgatados'),
   new SlashCommandBuilder().setName('itemcadastrar').setDescription('➕ Cadastrar novo item no catálogo de recompensas (Admin)'),
   new SlashCommandBuilder().setName('itemlistar').setDescription('📦 Ver todos os itens do catálogo por categoria (Admin)'),
+
+  // ── NOVOS COMANDOS ──────────────────────────────────────────
+  new SlashCommandBuilder()
+    .setName('perfil')
+    .setDescription('🃏 Ver o card de perfil divino de um jogador')
+    .addUserOption(opt => opt.setName('usuario').setDescription('Jogador a consultar (deixe vazio para ver o seu)').setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName('lembrete')
+    .setDescription('⏰ Receber um lembrete via DM após um tempo definido')
+    .addStringOption(opt => opt.setName('tempo').setDescription('Duração (ex: 30m, 2h, 1h30m, 45s)').setRequired(true))
+    .addStringOption(opt => opt.setName('mensagem').setDescription('O que deseja ser lembrado?').setRequired(true).setMaxLength(300)),
+
+  new SlashCommandBuilder()
+    .setName('stats')
+    .setDescription('📊 Estatísticas do servidor Tower Deep')
+    .addSubcommand(sub => sub.setName('servidor').setDescription('📈 Dados gerais do servidor'))
+    .addSubcommand(sub => sub.setName('jogador')
+      .setDescription('👤 Estatísticas detalhadas de um jogador')
+      .addUserOption(opt => opt.setName('usuario').setDescription('Jogador a consultar').setRequired(false))),
+
+  new SlashCommandBuilder()
+    .setName('sorteio')
+    .setDescription('🎉 Sistema de sorteios do Olimpo')
+    .addSubcommand(sub => sub.setName('criar')
+      .setDescription('🎁 Criar um novo sorteio')
+      .addStringOption(opt => opt.setName('premio').setDescription('O que será sorteado?').setRequired(true))
+      .addIntegerOption(opt => opt.setName('duracao').setDescription('Duração em minutos (ex: 60 = 1 hora)').setRequired(true).setMinValue(1).setMaxValue(10080))
+      .addIntegerOption(opt => opt.setName('vencedores').setDescription('Quantos vencedores? (padrão: 1)').setRequired(false).setMinValue(1).setMaxValue(10))
+      .addStringOption(opt => opt.setName('requisito').setDescription('ID do cargo necessário para participar (opcional)').setRequired(false)))
+    .addSubcommand(sub => sub.setName('encerrar')
+      .setDescription('🏆 Encerrar um sorteio e sortear vencedor')
+      .addStringOption(opt => opt.setName('id').setDescription('ID do sorteio (veja com /sorteio listar)').setRequired(true)))
+    .addSubcommand(sub => sub.setName('cancelar')
+      .setDescription('🗑️ Cancelar um sorteio sem sortear vencedor')
+      .addStringOption(opt => opt.setName('id').setDescription('ID do sorteio').setRequired(true)))
+    .addSubcommand(sub => sub.setName('listar').setDescription('📋 Ver todos os sorteios ativos'))
+    .addSubcommand(sub => sub.setName('resorteio')
+      .setDescription('🔄 Sortear novo vencedor')
+      .addStringOption(opt => opt.setName('id').setDescription('ID do sorteio encerrado').setRequired(true))),
+
 ].map(cmd => cmd.toJSON());
 
 async function registrarSlashCommands(clientId) {
@@ -2373,6 +3088,26 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    // ── /perfil ──────────────────────────────────────────────
+    if (interaction.isChatInputCommand() && interaction.commandName === 'perfil') {
+      return handlePerfil(interaction);
+    }
+
+    // ── /stats ───────────────────────────────────────────────
+    if (interaction.isChatInputCommand() && interaction.commandName === 'stats') {
+      return handleStats(interaction);
+    }
+
+    // ── /lembrete ────────────────────────────────────────────
+    if (interaction.isChatInputCommand() && interaction.commandName === 'lembrete') {
+      return criarLembrete(interaction);
+    }
+
+    // ── /sorteio ─────────────────────────────────────────────
+    if (interaction.isChatInputCommand() && interaction.commandName === 'sorteio') {
+      return handleSorteio(interaction);
+    }
+
   } catch (err) {
     console.error('Erro em interactionCreate:', err);
     if (interaction.isRepliable()) {
@@ -2596,6 +3331,36 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     }
   }
 });
+
+// ─────────────────────────────────────────────────────────────
+// LISTENERS DE REAÇÃO — SORTEIOS
+// ─────────────────────────────────────────────────────────────
+client.on('messageReactionAdd', async (reaction, user) => {
+  try {
+    if (reaction.partial) await reaction.fetch();
+    await handleReacaoSorteio(reaction, user);
+  } catch (err) { console.error('Erro em messageReactionAdd:', err.message); }
+});
+
+client.on('messageReactionRemove', async (reaction, user) => {
+  try {
+    if (reaction.partial) await reaction.fetch();
+    await handleReacaoRemovidaSorteio(reaction, user);
+  } catch (err) { console.error('Erro em messageReactionRemove:', err.message); }
+});
+
+// ─────────────────────────────────────────────────────────────
+// SHUTDOWN GRACIOSO — salva XP antes de encerrar
+// ─────────────────────────────────────────────────────────────
+async function shutdownGracioso(sinal) {
+  console.log(`\n⚠️ Sinal ${sinal} recebido — salvando dados...`);
+  clearTimeout(_xpSaveTimeout);
+  await salvarXP().catch(() => {});
+  console.log('✅ XP salvo. Encerrando bot...');
+  process.exit(0);
+}
+process.on('SIGTERM', () => shutdownGracioso('SIGTERM'));
+process.on('SIGINT',  () => shutdownGracioso('SIGINT'));
 
 // ─────────────────────────────────────────────────────────────
 // LOGIN
