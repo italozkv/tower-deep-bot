@@ -1541,11 +1541,21 @@ async function handleStats(interaction) {
         // Top jogadores
         { name: '🏆 Top 3 — Olimpo',  value: top3,                              inline: false },
 
-        // Sistema
-        { name: '🎫 Tickets',          value: '━━━━━━━━━━━━━━━',                 inline: false },
-        { name: '📂 Abertos',          value: `${ticketsAbertos}`,               inline: true  },
-        { name: '✅ Resolvidos',        value: `${ticketsResolvidos}`,            inline: true  },
-        { name: '🎉 Sorteios ativos',  value: `${sorteiosEmAndamento}`,          inline: true  },
+        // Tickets melhorado
+        { name: '🎫 Tickets',          value: '━━━━━━━━━━━━━━━',                       inline: false },
+        { name: '📂 Abertos',          value: `${ticketsAbertos}`,                     inline: true  },
+        { name: '✅ Resolvidos',        value: `${ticketsResolvidos}`,                  inline: true  },
+        { name: '🎉 Sorteios ativos',  value: `${sorteiosEmAndamento}`,                inline: true  },
+        { name: '🔴 Suporte',          value: suporteStatus.aberto ? '🟢 Aberto' : '🔴 Fechado', inline: true },
+        { name: '⏱️ Tempo médio resolução', value: (() => {
+            const com = [...ticketsAtivos.values()].filter(t => t.tempoResolucaoMs > 0);
+            if (!com.length) return '*Sem dados*';
+            const media = com.reduce((a, t) => a + t.tempoResolucaoMs, 0) / com.length;
+            const h = Math.floor(media / 3_600_000);
+            const m = Math.floor((media % 3_600_000) / 60_000);
+            return h > 0 ? `${h}h ${m}m` : `${m}m`;
+          })(), inline: true },
+        { name: '⚠️ Sem atendente',   value: `${[...ticketsAtivos.values()].filter(t => t.status==='aberto' && !t.assumidoPor).length}`, inline: true },
       )
       .setFooter({ text: `Tower Deep · Atualizado em` })
       .setTimestamp();
@@ -2696,6 +2706,85 @@ async function processarEtapa(message) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// SISTEMA DE HORÁRIO DE ATENDIMENTO
+// ─────────────────────────────────────────────────────────────
+const suporteStatus = {
+  aberto:    true,         // true = aberto, false = fechado
+  fechadoPor: null,        // tag de quem fechou
+  fechadoEm:  null,        // timestamp
+  mensagem:   null,        // mensagem customizada para quando fechado
+  reabreEm:   null,        // string opcional ex: "amanhã às 10h"
+};
+
+// SLA — alertas de ticket sem resposta
+const SLA_HORAS       = { baixa: 24, normal: 12, alta: 4, urgente: 1 };
+const SLA_TIMERS      = new Map(); // channelId → timeoutId
+
+const PRIORIDADES = {
+  baixa:   { label: '🔵 Baixa',   cor: 0x4a9eff, emoji: '🔵', slaH: 24 },
+  normal:  { label: '🟢 Normal',  cor: 0x3dd68c, emoji: '🟢', slaH: 12 },
+  alta:    { label: '🟡 Alta',    cor: 0xf0c060, emoji: '🟡', slaH:  4 },
+  urgente: { label: '🔴 Urgente', cor: 0xff5a5a, emoji: '🔴', slaH:  1 },
+};
+
+/** Agenda alerta de SLA para um ticket sem resposta */
+function agendarAlertaSLA(ticket) {
+  const prior   = PRIORIDADES[ticket.prioridade || 'normal'];
+  const msAlerta = prior.slaH * 60 * 60 * 1000;
+
+  // Cancela timer anterior se existir
+  if (SLA_TIMERS.has(ticket.channelId)) {
+    clearTimeout(SLA_TIMERS.get(ticket.channelId));
+  }
+
+  const timer = setTimeout(async () => {
+    SLA_TIMERS.delete(ticket.channelId);
+    // Só alerta se o ticket ainda estiver aberto e sem staff responsável
+    if (!ticketsAtivos.has(ticket.channelId)) return;
+    const t = ticketsAtivos.get(ticket.channelId);
+    if (t.status !== 'aberto' || t.assumidoPor) return;
+
+    try {
+      if (!CONFIG.CANAL_LOG_TICKETS) return;
+      for (const guild of client.guilds.cache.values()) {
+        const canalLog = guild.channels.cache.get(CONFIG.CANAL_LOG_TICKETS);
+        if (!canalLog) continue;
+        const canalTicket = guild.channels.cache.get(ticket.channelId);
+        await canalLog.send({
+          content: CONFIG.CARGO_MOD ? `<@&${CONFIG.CARGO_MOD}>` : '',
+          embeds: [new EmbedBuilder()
+            .setColor(0xff5a5a)
+            .setTitle(`⏰ SLA EXCEDIDO — Ticket #${t.id}`)
+            .setDescription(
+              `*Este chamado está aguardando atendimento há mais de **${prior.slaH}h** sem resposta da equipe!*`
+            )
+            .addFields(
+              { name: '👤 Usuário',    value: t.username,                                       inline: true },
+              { name: '📋 Categoria', value: CATEGORIAS_TICKET[t.categoria]?.label || t.categoria, inline: true },
+              { name: `${prior.emoji} Prioridade`, value: prior.label,                          inline: true },
+              { name: '📌 Canal',     value: canalTicket ? `<#${ticket.channelId}>` : `#${ticket.channelId}`, inline: false },
+              { name: '⏰ Aberto há', value: `<t:${Math.floor(t.criadoEm / 1000)}:R>`,          inline: true },
+            )
+            .setFooter({ text: 'Tower Deep · Sistema de SLA' })
+            .setTimestamp()],
+        });
+        break;
+      }
+    } catch (err) { console.error('[SLA] Erro ao enviar alerta:', err.message); }
+  }, msAlerta);
+
+  SLA_TIMERS.set(ticket.channelId, timer);
+}
+
+/** Cancela alerta SLA (quando staff assume ou ticket é fechado) */
+function cancelarAlertaSLA(channelId) {
+  if (SLA_TIMERS.has(channelId)) {
+    clearTimeout(SLA_TIMERS.get(channelId));
+    SLA_TIMERS.delete(channelId);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 // SISTEMA DE TICKETS
 // ─────────────────────────────────────────────────────────────
 const ticketsAtivos = new Map();
@@ -2759,10 +2848,12 @@ async function enviarPainelTicket(channel) {
   await channel.send({ embeds: [embed], components: [menu] });
 }
 
-async function abrirTicket(interaction, categoria) {
-  const guild   = interaction.guild;
-  const user    = interaction.user;
-  const catInfo = CATEGORIAS_TICKET[categoria];
+async function abrirTicket(interaction, categoria, prioridade = 'normal') {
+  const guild     = interaction.guild;
+  const user      = interaction.user;
+  const catInfo   = CATEGORIAS_TICKET[categoria];
+  const priorInfo = PRIORIDADES[prioridade] || PRIORIDADES.normal;
+
   const ticketExistente = [...ticketsAtivos.values()].find(t => t.userId === user.id && t.status === 'aberto');
   if (ticketExistente) {
     const canalExistente = guild.channels.cache.get(ticketExistente.channelId);
@@ -2772,50 +2863,93 @@ async function abrirTicket(interaction, categoria) {
     });
   }
   await interaction.deferReply({ ephemeral: true });
+
   const permissoes = [
-    { id: guild.id,  deny:  [PermissionFlagsBits.ViewChannel] },
-    { id: user.id,   allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+    { id: guild.id, deny:  [PermissionFlagsBits.ViewChannel] },
+    { id: user.id,  allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
   ];
   for (const id of [CONFIG.CARGO_DONO, CONFIG.CARGO_ADMIN, CONFIG.CARGO_MOD, CONFIG.CARGO_EQUIPE]) {
     if (id) permissoes.push({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages] });
   }
-  const numero = ticketContador++;
+
+  const numero    = ticketContador++;
   const nomeCanal = `ticket-${numero.toString().padStart(4, '0')}-${user.username.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12)}`;
   let canal;
   try {
-    const options = { name: nomeCanal, type: ChannelType.GuildText, permissionOverwrites: permissoes, topic: `${catInfo.emoji} ${catInfo.label} | ${user.tag} | Ticket #${numero}` };
+    const options = {
+      name: nomeCanal, type: ChannelType.GuildText, permissionOverwrites: permissoes,
+      topic: `${catInfo.emoji} ${catInfo.label} | ${priorInfo.emoji} ${priorInfo.label} | ${user.tag} | Ticket #${numero}`,
+    };
     if (CONFIG.CATEGORIA_TICKETS) options.parent = CONFIG.CATEGORIA_TICKETS;
     canal = await guild.channels.create(options);
   } catch (err) {
     console.error('Erro ao criar canal de ticket:', err.message);
     return interaction.editReply({ content: '⚠️ *Os deuses não conseguiram abrir a câmara. Verifique as permissões do bot.*' });
   }
-  const ticket = { id: numero, channelId: canal.id, userId: user.id, username: user.tag, categoria, status: 'aberto', abertoPor: user.id, criadoEm: Date.now(), fechadoEm: null, resolvidoPor: null, avaliacao: null, mensagens: [] };
+
+  const agora  = Date.now();
+  const ticket = {
+    id: numero, channelId: canal.id, userId: user.id, username: user.tag,
+    categoria, prioridade, status: 'aberto', abertoPor: user.id,
+    criadoEm: agora, fechadoEm: null, resolvidoPor: null, avaliacao: null,
+    ultimaRespostaStaff: null, tempoResolucaoMs: null, mensagens: [],
+  };
   ticketsAtivos.set(canal.id, ticket);
   salvarTickets().catch(err => console.error('Erro ao salvar tickets:', err.message));
+
+  // Aviso de suporte fechado
+  const avisoFechado = !suporteStatus.aberto
+    ? `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🌙 **ATENDIMENTO ENCERRADO**\n*${suporteStatus.mensagem || 'O suporte está temporariamente fechado.'} Nossa equipe responderá quando retornar.*${suporteStatus.reabreEm ? `\n📅 *Previsão de retorno: ${suporteStatus.reabreEm}*` : ''}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+    : '';
+
   const embedAbertura = new EmbedBuilder()
-    .setColor(catInfo.cor)
+    .setColor(suporteStatus.aberto ? priorInfo.cor : CONFIG.CORES.NEUTRO)
     .setTitle(`${catInfo.emoji} Ticket #${numero} — ${catInfo.label}`)
-    .setDescription(`Bem-vindo, ${user}!\n\n*Os deuses do Olimpo te ouvem, mortal.*\n\n**Descreve teu problema com o máximo de detalhes possível.**\nNossa equipe responderá o mais breve possível.`)
+    .setDescription(
+      `Bem-vindo, ${user}!\n\n*Os deuses do Olimpo registraram teu chamado, mortal.*\n\n` +
+      `**Descreve teu problema com o máximo de detalhes possível.**${avisoFechado}`
+    )
     .addFields(
-      { name: '📋 Categoria',  value: catInfo.label,                                inline: true },
-      { name: '👤 Aberto por', value: user.tag,                                     inline: true },
-      { name: '🕐 Aberto em',  value: `<t:${Math.floor(Date.now() / 1000)}:F>`,     inline: false },
+      { name: '📋 Categoria',                 value: catInfo.label,                                   inline: true },
+      { name: `${priorInfo.emoji} Prioridade`, value: priorInfo.label,                                inline: true },
+      { name: '⏱️ SLA',                       value: `Resposta em até **${priorInfo.slaH}h**`,        inline: true },
+      { name: '👤 Aberto por',                value: user.tag,                                        inline: true },
+      { name: '🕐 Aberto em',                 value: `<t:${Math.floor(agora / 1000)}:F>`,             inline: true },
+      { name: '🔔 Suporte',                   value: suporteStatus.aberto ? '🟢 Aberto' : '🔴 Fechado', inline: true },
     )
     .setFooter({ text: 'Tower Deep · Use os botões abaixo para gerenciar este ticket.' })
     .setTimestamp();
+
   const botoesLink = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setLabel('🌐 Site Oficial').setURL('https://italozkv.github.io/tower-deep/').setStyle(ButtonStyle.Link),
     new ButtonBuilder().setLabel('📖 Wiki').setURL('https://italozkv.github.io/tower-deep/wiki.html').setStyle(ButtonStyle.Link),
   );
   const botoesControle = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('ticket_fechar').setLabel('🔒 Fechar Ticket').setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId('ticket_resolver').setLabel('✅ Marcar Resolvido').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('ticket_fechar').setLabel('🔒 Fechar').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('ticket_resolver').setLabel('✅ Resolvido').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId('ticket_assumir').setLabel('⚔️ Assumir').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`ticket_prioridade_${canal.id}`).setLabel('🔄 Prioridade').setStyle(ButtonStyle.Secondary),
   );
-  await canal.send({ content: `${user} | <@&${CONFIG.CARGO_SUPORTE || CONFIG.CARGO_MOD || ''}>`, embeds: [embedAbertura], components: [botoesControle, botoesLink] });
-  await interaction.editReply({ content: `${catInfo.emoji} *A câmara foi aberta, mortal!* → ${canal}\n*Dirija-se até lá para falar com nossa equipe.*` });
-  await logTicket(guild, `🎫 **Ticket Aberto** — #${numero}\n👤 **Usuário:** ${user.tag}\n📋 **Categoria:** ${catInfo.label}\n📌 **Canal:** ${canal}`);
+
+  const mentionStaff = CONFIG.CARGO_MOD ? `<@&${CONFIG.CARGO_MOD}>` : '';
+  await canal.send({ content: `${user} ${mentionStaff}`.trim(), embeds: [embedAbertura], components: [botoesControle, botoesLink] });
+
+  const replyMsg = suporteStatus.aberto
+    ? `${catInfo.emoji} *A câmara foi aberta!* → ${canal}\n*Dirija-se até lá para falar com nossa equipe.*`
+    : `${catInfo.emoji} *Câmara aberta!* → ${canal}\n\n🌙 **Suporte fechado no momento.** ${suporteStatus.mensagem || ''}${suporteStatus.reabreEm ? `\n📅 Previsão de retorno: **${suporteStatus.reabreEm}**` : ''}\n\n*Sua mensagem foi registrada e será respondida quando o atendimento reabrir.*`;
+
+  await interaction.editReply({ content: replyMsg });
+  await logTicket(guild,
+    `🎫 **Ticket Aberto** — #${numero}\n` +
+    `👤 **Usuário:** ${user.tag}\n` +
+    `📋 **Categoria:** ${catInfo.label}\n` +
+    `${priorInfo.emoji} **Prioridade:** ${priorInfo.label}\n` +
+    `🔔 **Suporte:** ${suporteStatus.aberto ? '🟢 Aberto' : '🔴 Fechado'}\n` +
+    `📌 **Canal:** ${canal}`
+  );
+
+  // Agenda alerta de SLA (só se suporte aberto)
+  if (suporteStatus.aberto) agendarAlertaSLA(ticket);
 }
 
 async function fecharTicket(interaction, ticket) {
@@ -2834,8 +2968,10 @@ async function fecharTicket(interaction, ticket) {
       transcricao += `[${new Date(m.createdTimestamp).toLocaleTimeString('pt-BR')}] ${m.author.tag}: ${m.content || '[embed/arquivo]'}\n`;
     }
   } catch { transcricao += '*(Não foi possível coletar mensagens)*\n'; }
-  ticket.status    = 'fechado';
-  ticket.fechadoEm = Date.now();
+  ticket.status         = 'fechado';
+  ticket.fechadoEm      = Date.now();
+  ticket.tempoResolucaoMs = Date.now() - ticket.criadoEm;
+  cancelarAlertaSLA(canal.id);
   ticketsAtivos.delete(canal.id);
   await salvarTickets().catch(() => {});
   const embedFechado = new EmbedBuilder()
@@ -3016,6 +3152,17 @@ const slashCommands = [
   new SlashCommandBuilder().setName('minhaconta').setDescription('👤 Ver sua conta Roblox vinculada e códigos resgatados'),
   new SlashCommandBuilder().setName('itemcadastrar').setDescription('➕ Cadastrar novo item no catálogo de recompensas (Admin)'),
   new SlashCommandBuilder().setName('itemlistar').setDescription('📦 Ver todos os itens do catálogo por categoria (Admin)'),
+
+  new SlashCommandBuilder()
+    .setName('fecharsuporte')
+    .setDescription('🌙 Fechar o atendimento de suporte (Mod+)')
+    .addStringOption(opt => opt.setName('mensagem').setDescription('Mensagem para exibir nos tickets (ex: Voltamos amanhã às 10h)').setRequired(false))
+    .addStringOption(opt => opt.setName('reabre').setDescription('Previsão de retorno (ex: amanhã às 10h)').setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName('abrirsuporte')
+    .setDescription('☀️ Reabrir o atendimento de suporte (Mod+)')
+    .addStringOption(opt => opt.setName('mensagem').setDescription('Mensagem de reabertura (opcional)').setRequired(false)),
 
   new SlashCommandBuilder()
     .setName('xpbonus')
@@ -3330,6 +3477,87 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isChatInputCommand() && interaction.commandName === 'enquete') {
       return handleEnquete(interaction);
+    }
+
+    // ── /fecharsuporte ──────────────────────────────────────
+    if (interaction.isChatInputCommand() && interaction.commandName === 'fecharsuporte') {
+      if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '🚫 *Apenas guardiões podem encerrar o atendimento.*', ephemeral: true });
+      if (!suporteStatus.aberto) return interaction.reply({ content: '⚠️ *O suporte já está fechado.*', ephemeral: true });
+
+      const mensagem = sanitizar(interaction.options.getString('mensagem') || 'O atendimento está temporariamente encerrado.', 200);
+      const reabreEm = sanitizar(interaction.options.getString('reabre') || '', 80) || null;
+
+      suporteStatus.aberto    = false;
+      suporteStatus.fechadoPor = interaction.user.tag;
+      suporteStatus.fechadoEm  = Date.now();
+      suporteStatus.mensagem   = mensagem;
+      suporteStatus.reabreEm   = reabreEm;
+      salvarArquivoJsonNoGist('suporte-status.json', { aberto: false, mensagem, reabreEm }).catch(() => {});
+
+      const embed = new EmbedBuilder()
+        .setColor(CONFIG.CORES.NEUTRO)
+        .setTitle('🌙 ATENDIMENTO ENCERRADO')
+        .setDescription(`*Os guardiões do Olimpo encerraram o expediente.*\n\n${mensagem}${reabreEm ? `\n\n📅 **Previsão de retorno:** ${reabreEm}` : ''}`)
+        .addFields(
+          { name: '🔒 Encerrado por',  value: interaction.user.tag,                             inline: true },
+          { name: '🕐 Horário',        value: `<t:${Math.floor(Date.now() / 1000)}:F>`,         inline: true },
+          { name: '📝 Informação',     value: 'Novos tickets poderão ser abertos, mas receberão aviso de suporte fechado.', inline: false },
+        )
+        .setFooter({ text: 'Tower Deep · Use /abrirsuporte para reabrir' })
+        .setTimestamp();
+
+      // Posta aviso no canal de log
+      if (CONFIG.CANAL_LOG_TICKETS) {
+        try {
+          const canalLog = await client.channels.fetch(CONFIG.CANAL_LOG_TICKETS).catch(() => null);
+          if (canalLog?.isTextBased()) await canalLog.send({ embeds: [embed] });
+        } catch { /* não crítico */ }
+      }
+
+      return interaction.reply({ embeds: [embed] });
+    }
+
+    // ── /abrirsuporte ────────────────────────────────────────
+    if (interaction.isChatInputCommand() && interaction.commandName === 'abrirsuporte') {
+      if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '🚫 *Apenas guardiões podem reabrir o atendimento.*', ephemeral: true });
+      if (suporteStatus.aberto) return interaction.reply({ content: '✅ *O suporte já está aberto.*', ephemeral: true });
+
+      const mensagem = sanitizar(interaction.options.getString('mensagem') || 'O atendimento foi reaberto. Estamos prontos para ajudá-los!', 200);
+
+      suporteStatus.aberto    = true;
+      suporteStatus.fechadoPor = null;
+      suporteStatus.fechadoEm  = null;
+      suporteStatus.mensagem   = null;
+      suporteStatus.reabreEm   = null;
+      salvarArquivoJsonNoGist('suporte-status.json', { aberto: true, mensagem: null, reabreEm: null }).catch(() => {});
+
+      // Reagenda SLA para todos os tickets abertos sem atendente
+      for (const ticket of ticketsAtivos.values()) {
+        if (ticket.status === 'aberto' && !ticket.assumidoPor) {
+          agendarAlertaSLA(ticket);
+        }
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(CONFIG.CORES.SUCESSO)
+        .setTitle('☀️ ATENDIMENTO REABERTO')
+        .setDescription(`*Os guardiões do Olimpo retornaram ao expediente!*\n\n${mensagem}`)
+        .addFields(
+          { name: '✅ Reaberto por', value: interaction.user.tag,                    inline: true },
+          { name: '🕐 Horário',      value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
+          { name: '🎫 Pendentes',    value: `${[...ticketsAtivos.values()].filter(t => t.status === 'aberto').length} ticket(s) aguardando atendimento`, inline: false },
+        )
+        .setFooter({ text: 'Tower Deep · Atendimento ativo' })
+        .setTimestamp();
+
+      if (CONFIG.CANAL_LOG_TICKETS) {
+        try {
+          const canalLog = await client.channels.fetch(CONFIG.CANAL_LOG_TICKETS).catch(() => null);
+          if (canalLog?.isTextBased()) await canalLog.send({ embeds: [embed] });
+        } catch { /* não crítico */ }
+      }
+
+      return interaction.reply({ embeds: [embed] });
     }
 
     if (interaction.isChatInputCommand() && interaction.commandName === 'xpbonus') {
@@ -3925,7 +4153,35 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_criar') {
       const categoria = interaction.values[0];
-      return abrirTicket(interaction, categoria);
+      // Mostra menu de prioridade antes de abrir
+      const menuPrior = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`ticket_prior_${categoria}`)
+          .setPlaceholder('⚡ Qual a urgência do seu chamado?')
+          .addOptions(
+            Object.entries(PRIORIDADES).map(([value, p]) =>
+              new StringSelectMenuOptionBuilder()
+                .setLabel(p.label)
+                .setDescription(`Resposta em até ${p.slaH}h`)
+                .setValue(value)
+            )
+          )
+      );
+      return interaction.reply({
+        embeds: [new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA)
+          .setTitle('⚡ Qual a urgência do teu chamado?')
+          .setDescription('*Selecione a prioridade para que possamos atender na ordem correta.*\n\n🔵 **Baixa** — dúvida geral, sem pressa\n🟢 **Normal** — problema comum\n🟡 **Alta** — afeta seu progresso no jogo\n🔴 **Urgente** — bloqueio crítico, perda de itens')
+          .setFooter({ text: 'Tower Deep · Escolha com honestidade, mortal.' })],
+        components: [menuPrior], ephemeral: true,
+      });
+    }
+
+    // Prioridade selecionada → abre o ticket
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('ticket_prior_')) {
+      const categoria  = interaction.customId.replace('ticket_prior_', '');
+      const prioridade = interaction.values[0];
+      await interaction.deferUpdate();
+      return abrirTicket(interaction, categoria, prioridade);
     }
 
     if (interaction.isChatInputCommand() && interaction.commandName === 'ticket') {
@@ -3939,12 +4195,17 @@ client.on('interactionCreate', async (interaction) => {
         if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas guardiões do Olimpo podem ver esta lista.*', ephemeral: true });
         const lista = [...ticketsAtivos.values()].filter(t => t.status === 'aberto');
         if (!lista.length) return interaction.reply({ content: '✅ *Nenhum ticket aberto no momento.*', ephemeral: true });
+        // Ordena por prioridade: urgente → alta → normal → baixa
+        const ordemPrior = { urgente: 0, alta: 1, normal: 2, baixa: 3 };
+        lista.sort((a, b) => (ordemPrior[a.prioridade] ?? 2) - (ordemPrior[b.prioridade] ?? 2));
         const texto = lista.map(t => {
-          const canalRef = interaction.guild.channels.cache.get(t.channelId);
-          const cat = CATEGORIAS_TICKET[t.categoria]?.emoji || '📜';
-          const mins = Math.floor((Date.now() - t.criadoEm) / 60000);
-          const tempo = mins < 60 ? `${mins}min` : `${Math.floor(mins/60)}h${mins%60}min`;
-          return `${cat} **#${t.id}** — ${t.username} — ${t.categoria} — aberto há ${tempo} ${canalRef ? `→ ${canalRef}` : ''}`;
+          const canalRef  = interaction.guild.channels.cache.get(t.channelId);
+          const cat       = CATEGORIAS_TICKET[t.categoria]?.emoji || '📜';
+          const prior     = PRIORIDADES[t.prioridade] || PRIORIDADES.normal;
+          const mins      = Math.floor((Date.now() - t.criadoEm) / 60000);
+          const tempo     = mins < 60 ? `${mins}min` : `${Math.floor(mins/60)}h${mins%60}min`;
+          const semResposta = !t.assumidoPor ? ' ⚠️' : '';
+          return `${prior.emoji} ${cat} **#${t.id}** — ${t.username} — aberto há ${tempo}${semResposta} ${canalRef ? `→ ${canalRef}` : ''}`;
         }).join('\n');
         return interaction.reply({ content: `📜 **TICKETS ABERTOS — ${lista.length} chamado(s)**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${texto}`, ephemeral: true });
       }
@@ -4018,10 +4279,65 @@ client.on('interactionCreate', async (interaction) => {
       const ticket = ticketsAtivos.get(interaction.channelId);
       if (!ticket) return interaction.reply({ content: '⚠️ *Ticket não encontrado.*', ephemeral: true });
       if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas staff pode assumir um ticket.*', ephemeral: true });
-      ticket.assumidoPor = interaction.user.tag;
+      ticket.assumidoPor         = interaction.user.tag;
+      ticket.ultimaRespostaStaff = Date.now();
+      cancelarAlertaSLA(interaction.channelId); // Cancela SLA — staff está presente
       await salvarTickets().catch(() => {});
-      await interaction.reply({ content: `⚔️ **${interaction.user} assumiu o atendimento deste ticket.**` });
+      const priorInfo = PRIORIDADES[ticket.prioridade] || PRIORIDADES.normal;
+      await interaction.reply({ content: `⚔️ **${interaction.user} assumiu o atendimento deste ticket.**\n${priorInfo.emoji} Prioridade: **${priorInfo.label}** · SLA: **${priorInfo.slaH}h**` });
       return;
+    }
+
+    // ── Botão: Alterar Prioridade ───────────────────────────
+    if (interaction.isButton() && interaction.customId.startsWith('ticket_prioridade_')) {
+      const channelId = interaction.customId.replace('ticket_prioridade_', '');
+      const ticket    = ticketsAtivos.get(channelId);
+      if (!ticket) return interaction.reply({ content: '⚠️ *Ticket não encontrado.*', ephemeral: true });
+      if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas staff pode alterar prioridade.*', ephemeral: true });
+
+      const menu = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`ticket_set_prioridade_${channelId}`)
+          .setPlaceholder('Selecione a nova prioridade...')
+          .addOptions(
+            Object.entries(PRIORIDADES).map(([value, p]) =>
+              new StringSelectMenuOptionBuilder()
+                .setLabel(p.label)
+                .setDescription(`SLA: resposta em até ${p.slaH}h`)
+                .setValue(value)
+                .setDefault(ticket.prioridade === value)
+            )
+          )
+      );
+      return interaction.reply({
+        embeds: [new EmbedBuilder().setColor(CONFIG.CORES.AVISO).setTitle('🔄 Alterar Prioridade').setDescription(`**Ticket #${ticket.id}** — Prioridade atual: **${PRIORIDADES[ticket.prioridade]?.label || ticket.prioridade}**\n\nSelecione a nova prioridade:`)],
+        components: [menu], ephemeral: true,
+      });
+    }
+
+    // ── Select: Confirmar nova prioridade ────────────────────
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('ticket_set_prioridade_')) {
+      const channelId    = interaction.customId.replace('ticket_set_prioridade_', '');
+      const ticket       = ticketsAtivos.get(channelId);
+      if (!ticket) return interaction.reply({ content: '⚠️', ephemeral: true });
+      const novaPrior    = interaction.values[0];
+      const priorInfo    = PRIORIDADES[novaPrior];
+      const priorAnterior = PRIORIDADES[ticket.prioridade]?.label || ticket.prioridade;
+      ticket.prioridade  = novaPrior;
+      await salvarTickets().catch(() => {});
+      // Reagenda SLA com nova prioridade
+      cancelarAlertaSLA(channelId);
+      agendarAlertaSLA(ticket);
+      const canal = interaction.guild.channels.cache.get(channelId);
+      if (canal) {
+        await canal.send({
+          embeds: [new EmbedBuilder().setColor(priorInfo.cor)
+            .setTitle('🔄 Prioridade Alterada')
+            .setDescription(`${priorInfo.emoji} **${priorInfo.label}** *(era: ${priorAnterior})*\n*Alterado por: ${interaction.user.tag}*\nNovo SLA: resposta em até **${priorInfo.slaH}h**`)
+            .setTimestamp()],
+        });
+      }
+      return interaction.update({ content: `✅ Prioridade alterada para **${priorInfo.label}**`, embeds: [], components: [] });
     }
 
     if (interaction.isButton() && interaction.customId.startsWith('avaliar_')) {
@@ -4260,7 +4576,7 @@ Seu cargo de Membro foi liberado. Aproveite todos os canais! 🔱`,
         cadastro: new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA).setTitle('📋 Onboarding')
           .setDescription('**Fluxo automático de entrada:**\n1️⃣ Entra → cargo Pendente\n2️⃣ Painel no canal de cadastro → botão Iniciar\n3️⃣ Modal: apelido, idade, plataforma, origem\n4️⃣ `/vincular SeuUser` → Verificar Vínculo\n5️⃣ Cargo Membro liberado\n\nVars: `CANAL_CADASTRO` `CARGO_PENDENTE`'),
         equipe:   new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA).setTitle('🛡️ Equipe & Mods')
-          .setDescription('`!token` · `!update` · `!listar` · `!revogar`\n`/enquete` · `/limpar` · `/anuncio agora/listar`\n`/sorteio criar/encerrar/cancelar/listar`\n`/stats servidor` · `/ticket painel/listar/assumir/fechar/resolver`'),
+          .setDescription('`!token` · `!update` · `!listar` · `!revogar`\n`/enquete` · `/limpar` · `/anuncio agora/listar`\n`/sorteio criar/encerrar/cancelar/listar`\n`/stats servidor` · `/ticket painel/listar/assumir/fechar/resolver`\n`/fecharsuporte` · `/abrirsuporte` · `/xpbonus`'),
         admin:    new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA).setTitle('🔱 Administradores')
           .setDescription('`!editar N campo val` · `!apagar N`\n`/changelog listar/apagar/editar/imagem`\n`/roadmap adicionar/item/concluir/status`\n`/anuncio agendar/cancelar`\n`/gencodigo` · `/codigo listar/desativar/info`\n`/itemcadastrar` · `/itemlistar`'),
       };
@@ -4375,6 +4691,12 @@ client.once('ready', async () => {
   await registrarSlashCommands(client.user.id);
   await carregarXP();
   await carregarTickets();
+  // Carrega estado do suporte do Gist
+  try {
+    const st = await lerArquivoJsonDoGist('suporte-status.json', null);
+    if (st) { suporteStatus.aberto = st.aberto ?? true; suporteStatus.mensagem = st.mensagem || null; suporteStatus.reabreEm = st.reabreEm || null; }
+    console.log(`🎫 Suporte: ${suporteStatus.aberto ? '🟢 Aberto' : '🔴 Fechado'}`);
+  } catch { /* usa padrão aberto */ }
   await carregarAnuncios();
   await carregarCadastros();
   await carregarEnquetesAtivas();
