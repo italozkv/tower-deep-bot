@@ -44,7 +44,10 @@ const CONFIG = {
   CATEGORIA_TICKETS: process.env.CATEGORIA_TICKETS,
   CANAL_LOG_TICKETS: process.env.CANAL_LOG_TICKETS,
   ROBLOX_API_SECRET: process.env.ROBLOX_API_SECRET || 'tower-deep-secret-2024',
-  CANAL_CODIGOS:     process.env.CANAL_CODIGOS,
+  CANAL_CODIGOS:      process.env.CANAL_CODIGOS,
+  CANAL_CADASTRO:     process.env.CANAL_CADASTRO,
+  CANAL_LOG_CADASTRO: process.env.CANAL_LOG_CADASTRO,
+  CARGO_PENDENTE:     process.env.CARGO_PENDENTE,
   CORES: {
     PRIMARIA: 0xc9a84c,
     ERRO:     0xff5a5a,
@@ -138,8 +141,17 @@ REGRAS DO SERVIDOR:
 // MEMÓRIAS / SESSÕES
 // ─────────────────────────────────────────────────────────────
 const historicos    = new Map();
+const historicoTs   = new Map();
 const MAX_HISTORICO = 10;
 const sessoes       = new Map();
+
+// Limpa históricos de IA inativos há mais de 30 min
+setInterval(() => {
+  const limite = Date.now() - 30 * 60 * 1000;
+  for (const [id, ts] of historicoTs) {
+    if (ts < limite) { historicos.delete(id); historicoTs.delete(id); }
+  }
+}, 10 * 60 * 1000);
 
 // ─────────────────────────────────────────────────────────────
 // TAGS DE UPDATE
@@ -198,6 +210,132 @@ function ganharXP(userId) {
   return { subiu: false };
 }
 
+
+// ─────────────────────────────────────────────────────────────
+// XP BÔNUS — Recompensas por ações específicas
+// ─────────────────────────────────────────────────────────────
+const XP_BONUS = {
+  BUG_REPORTADO:      { xp: 15,  label: '🐛 Bug reportado'               },
+  BUG_CONFIRMADO:     { xp: 50,  label: '🐛 Bug confirmado pela equipe'   },
+  SUGESTAO_ENVIADA:   { xp: 10,  label: '💡 Sugestão enviada'             },
+  SUGESTAO_APROVADA:  { xp: 30,  label: '💡 Sugestão aprovada pela equipe'},
+  CADASTRO_COMPLETO:  { xp: 20,  label: '📋 Cadastro concluído'           },
+  SORTEIO_PARTICIPOU: { xp: 5,   label: '🎉 Participou de sorteio'        },
+  TICKET_RESOLVIDO:   { xp: 10,  label: '🎫 Ticket resolvido'             },
+  ENQUETE_CRIADA:     { xp: 5,   label: '🗳️ Enquete encerrada com votos'  },
+};
+
+/**
+ * Dá XP bônus a um usuário por uma ação específica.
+ * Anuncia level up no canal se fornecido.
+ * @param {string} userId
+ * @param {string} tipoBonus — chave de XP_BONUS
+ * @param {string} username
+ * @param {object|null} canal — TextChannel para anunciar level up
+ */
+async function darXPBonus(userId, tipoBonus, username = '', canal = null) {
+  const bonus = XP_BONUS[tipoBonus];
+  if (!bonus) return;
+
+  if (!xpData.has(userId)) {
+    xpData.set(userId, { xp: 0, nivel: 1, msgs: 0, username, lastMsg: 0 });
+  }
+  const dados = xpData.get(userId);
+  if (username) dados.username = username;
+
+  const nivelAntes  = getNivel(dados.xp);
+  dados.xp         += bonus.xp;
+  const nivelDepois = getNivel(dados.xp);
+  dados.nivel       = nivelDepois.nivel;
+  salvarXPDebounced();
+
+  console.log(`⚡ XP Bônus: +${bonus.xp} XP → ${username || userId} (${bonus.label})`);
+
+  // Anuncia level up se subiu de nível e tem canal disponível
+  if (canal && nivelDepois.nivel > nivelAntes.nivel) {
+    try {
+      const user = await client.users.fetch(userId).catch(() => null);
+      const embedUp = new EmbedBuilder()
+        .setColor(CONFIG.CORES.AVISO)
+        .setTitle('⚡ ASCENSÃO DIVINA! ⚡')
+        .setDescription(
+          `<@${userId}> ascendeu para **${nivelDepois.nome}** (Nível ${nivelDepois.nivel})!
+` +
+          `*Bônus recebido: ${bonus.label} (+${bonus.xp} XP)*
+
+` +
+          `*Os deuses do Olimpo reconhecem tua dedicação, mortal.* 🔱`
+        )
+        .setThumbnail(user?.displayAvatarURL({ dynamic: true }) || null)
+        .setTimestamp();
+      await canal.send({ content: `<@${userId}>`, embeds: [embedUp] });
+    } catch { /* não crítico */ }
+  }
+
+  return { xpGanho: bonus.xp, label: bonus.label, subiu: nivelDepois.nivel > nivelAntes.nivel };
+}
+
+/**
+ * Slash command /xpbonus — permite staff confirmar bug/sugestão e dar XP manual
+ */
+async function handleXPBonus(interaction) {
+  if (!ehEquipe(interaction.member)) {
+    return interaction.reply({ content: '🚫 *Apenas a Equipe pode conceder bênçãos divinas de XP.*', ephemeral: true });
+  }
+
+  const sub    = interaction.options.getSubcommand();
+  const alvo   = interaction.options.getUser('usuario');
+  const canal  = interaction.channel;
+
+  if (sub === 'bug') {
+    await interaction.deferReply({ ephemeral: true });
+    const resultado = await darXPBonus(alvo.id, 'BUG_CONFIRMADO', alvo.username, canal);
+    return interaction.editReply({
+      content: `✅ Bug confirmado! <@${alvo.id}> recebeu **+${resultado.xpGanho} XP** (${resultado.label}).`,
+    });
+  }
+
+  if (sub === 'sugestao') {
+    await interaction.deferReply({ ephemeral: true });
+    const resultado = await darXPBonus(alvo.id, 'SUGESTAO_APROVADA', alvo.username, canal);
+    return interaction.editReply({
+      content: `✅ Sugestão aprovada! <@${alvo.id}> recebeu **+${resultado.xpGanho} XP** (${resultado.label}).`,
+    });
+  }
+
+  if (sub === 'manual') {
+    if (!ehAdmin(interaction.member)) {
+      return interaction.editReply({ content: '🚫 *Apenas Admins podem conceder XP manual.*' });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const quantidade = interaction.options.getInteger('quantidade');
+    const motivo     = sanitizar(interaction.options.getString('motivo') || 'Bênção divina manual', 100);
+
+    if (!xpData.has(alvo.id)) xpData.set(alvo.id, { xp: 0, nivel: 1, msgs: 0, username: alvo.username, lastMsg: 0 });
+    const dados      = xpData.get(alvo.id);
+    const nivelAntes = getNivel(dados.xp);
+    dados.xp        += quantidade;
+    dados.username   = alvo.username;
+    const nivelDepois = getNivel(dados.xp);
+    dados.nivel       = nivelDepois.nivel;
+    salvarXPDebounced();
+
+    if (nivelDepois.nivel > nivelAntes.nivel) {
+      const embedUp = new EmbedBuilder()
+        .setColor(CONFIG.CORES.AVISO).setTitle('⚡ ASCENSÃO DIVINA! ⚡')
+        .setDescription(`<@${alvo.id}> ascendeu para **${nivelDepois.nome}** (Nível ${nivelDepois.nivel})!
+*${motivo}*`)
+        .setTimestamp();
+      await canal.send({ content: `<@${alvo.id}>`, embeds: [embedUp] });
+    }
+
+    return interaction.editReply({
+      content: `✅ <@${alvo.id}> recebeu **+${quantidade} XP** manual.
+📝 Motivo: *${motivo}*`,
+    });
+  }
+}
+
 let _xpSaveTimeout = null;
 function salvarXPDebounced() {
   if (_xpSaveTimeout) clearTimeout(_xpSaveTimeout);
@@ -237,6 +375,7 @@ function githubRequest(method, path, body = null) {
         }
       });
     });
+    req.setTimeout(15_000, () => req.destroy(new Error('GitHub API timeout')));
     req.on('error', reject);
     if (bodyString) req.write(bodyString);
     req.end();
@@ -320,7 +459,7 @@ async function getCache() {
   if (!_codigosCache || Date.now() > _cacheTTL) {
     _codigosCache  = await lerCodigos();
     _vinculosCache = await lerVinculos();
-    _cacheTTL      = Date.now() + 30000;
+    _cacheTTL      = Date.now() + 120_000; // 2 minutos
   }
   return { codigos: _codigosCache, vinculos: _vinculosCache };
 }
@@ -590,6 +729,10 @@ function temPermissaoModeracao(interaction) {
   return interaction.member?.permissions?.has(PermissionFlagsBits.ManageMessages);
 }
 
+function sanitizar(texto, maxLen = 500) {
+  return String(texto || '').trim().slice(0, maxLen).replace(/@(everyone|here)/gi, '[@$1]');
+}
+
 async function responderTextoLongo(messageOrInteraction, texto, isReply = true) {
   if (texto.length <= 2000) {
     if ('reply' in messageOrInteraction && isReply) return messageOrInteraction.reply(texto);
@@ -603,6 +746,163 @@ async function responderTextoLongo(messageOrInteraction, texto, isReply = true) 
     return;
   }
   for (const parte of partes) await messageOrInteraction.channel.send(parte);
+}
+
+// ─────────────────────────────────────────────────────────────
+// SISTEMA DE ONBOARDING / CADASTRO
+// ─────────────────────────────────────────────────────────────
+const cadastrosPendentes = new Map();
+
+async function lerCadastros()    { return lerArquivoJsonDoGist('cadastros.json', { cadastros: [] }); }
+async function salvarCadastros() {
+  const lista = [...cadastrosPendentes.values()].map(({ _timeout, ...d }) => d);
+  return salvarArquivoJsonNoGist('cadastros.json', { cadastros: lista });
+}
+
+async function enviarPainelCadastro(member) {
+  if (!CONFIG.CANAL_CADASTRO) return;
+  const canal = await client.channels.fetch(CONFIG.CANAL_CADASTRO).catch(() => null);
+  if (!canal?.isTextBased()) return;
+
+  const embed = new EmbedBuilder()
+    .setColor(CONFIG.CORES.PRIMARIA)
+    .setTitle('⚡ BEM-VINDO AO OLIMPO, ' + member.user.username.toUpperCase() + '!')
+    .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 256 }))
+    .setDescription(
+      '*Os deuses do Olimpo te aguardavam, mortal.*\n\n' +
+      'Para acessar os canais e benefícios do servidor, complete o **Ritual de Iniciação**:\n\n' +
+      '**📋 Passo 1** — Clique em **Iniciar Cadastro** e preencha seus dados\n' +
+      '**🔗 Passo 2** — Vincule sua conta Roblox com `/vincular`\n' +
+      '**✅ Passo 3** — Clique em **Verificar Vínculo** para liberar acesso\n\n' +
+      '*Todo o processo leva menos de 2 minutos!*'
+    )
+    .setFooter({ text: 'Tower Deep · Ritual de Iniciação' })
+    .setTimestamp();
+
+  const botoes = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`cadastro_iniciar_${member.id}`)
+      .setLabel('📋 Iniciar Cadastro')
+      .setStyle(ButtonStyle.Primary),
+  );
+
+  const msg = await canal.send({ content: `<@${member.id}>`, embeds: [embed], components: [botoes] });
+  const dados = {
+    discordId: member.id, username: member.user.tag, guildId: member.guild.id,
+    messageId: msg.id, canalId: canal.id, etapa: 'aguardando_cadastro',
+    iniciadoEm: new Date().toISOString(),
+  };
+  const timeout = setTimeout(async () => {
+    cadastrosPendentes.delete(member.id);
+    await msg.delete().catch(() => {});
+  }, 7 * 24 * 60 * 60 * 1000);
+  dados._timeout = timeout;
+  cadastrosPendentes.set(member.id, dados);
+}
+
+async function atualizarPainelCadastro(dados, etapa, extra = {}) {
+  try {
+    const canal = await client.channels.fetch(dados.canalId);
+    const msg   = await canal.messages.fetch(dados.messageId);
+    const p1 = etapa !== 'aguardando_cadastro' ? '✅' : '⏳';
+    const p2 = etapa === 'aguardando_vinculo' ? '⏳' : (etapa === 'aguardando_verificacao' || etapa === 'concluido') ? '✅' : '🔒';
+    const p3 = etapa === 'aguardando_verificacao' ? '⏳' : etapa === 'concluido' ? '✅' : '🔒';
+
+    const cores = { aguardando_cadastro: CONFIG.CORES.PRIMARIA, aguardando_vinculo: CONFIG.CORES.AVISO, aguardando_verificacao: CONFIG.CORES.INFO, concluido: CONFIG.CORES.SUCESSO };
+    const icons = { aguardando_cadastro: '📋', aguardando_vinculo: '🔗', aguardando_verificacao: '✅', concluido: '🏆' };
+    const txts  = {
+      aguardando_cadastro: 'Aguardando preenchimento do formulário...',
+      aguardando_vinculo:  'Formulário recebido! Use `/vincular` com seu usuário Roblox.',
+      aguardando_verificacao: 'Conta vinculada! Clique em **Verificar Vínculo** abaixo.',
+      concluido: 'Cadastro concluído! Seja bem-vindo ao Olimpo! 🔱',
+    };
+
+    const embed = new EmbedBuilder()
+      .setColor(cores[etapa] || CONFIG.CORES.PRIMARIA)
+      .setTitle(`${icons[etapa] || '📋'} RITUAL DE INICIAÇÃO — ${dados.username.split('#')[0]}`)
+      .setDescription(
+        `*${txts[etapa] || ''}*
+
+` +
+        `**📋 Passo 1 — Formulário:** ${p1}
+` +
+        `**🔗 Passo 2 — Vincular Roblox:** ${p2}
+` +
+        `**✅ Passo 3 — Verificar:** ${p3}` +
+        (dados.apelido     ? `
+
+👤 **Apelido:** ${dados.apelido}` : '') +
+        (dados.plataforma  ? `
+🎮 **Plataforma:** ${dados.plataforma}` : '') +
+        (dados.robloxName  ? `
+🕹️ **Roblox:** ${dados.robloxName}` : '')
+      )
+      .setThumbnail(extra.avatar || null)
+      .setFooter({ text: 'Tower Deep · Ritual de Iniciação' })
+      .setTimestamp();
+
+    if (etapa === 'aguardando_vinculo') {
+      embed.addFields({ name: '🔗 Como vincular?', value: 'Use `/vincular SeuUserRoblox` neste canal.\nDepois clique em **Verificar Vínculo** abaixo.', inline: false });
+    }
+
+    let botoesRow;
+    if (etapa === 'aguardando_vinculo') {
+      botoesRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`cadastro_iniciar_${dados.discordId}`).setLabel('📋 Refazer Formulário').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`cadastro_verificar_${dados.discordId}`).setLabel('✅ Verificar Vínculo').setStyle(ButtonStyle.Success),
+      );
+    } else if (etapa === 'aguardando_verificacao') {
+      botoesRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`cadastro_verificar_${dados.discordId}`).setLabel('✅ Verificar Vínculo').setStyle(ButtonStyle.Success),
+      );
+    } else if (etapa === 'concluido') {
+      botoesRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('cadastro_done').setLabel('🏆 Acesso Liberado!').setStyle(ButtonStyle.Success).setDisabled(true),
+      );
+    } else {
+      botoesRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`cadastro_iniciar_${dados.discordId}`).setLabel('📋 Iniciar Cadastro').setStyle(ButtonStyle.Primary),
+      );
+    }
+    await msg.edit({ embeds: [embed], components: [botoesRow] });
+  } catch (err) { console.error('[CADASTRO] Erro ao atualizar painel:', err.message); }
+}
+
+async function logCadastroStaff(guild, dados) {
+  if (!CONFIG.CANAL_LOG_CADASTRO) return;
+  try {
+    const canal = await client.channels.fetch(CONFIG.CANAL_LOG_CADASTRO).catch(() => null);
+    if (!canal?.isTextBased()) return;
+    const embed = new EmbedBuilder()
+      .setColor(CONFIG.CORES.SUCESSO)
+      .setTitle('🆕 Novo Membro Cadastrado!')
+      .addFields(
+        { name: '👤 Discord',       value: `<@${dados.discordId}> (${dados.username})`, inline: true  },
+        { name: '🕹️ Roblox',       value: dados.robloxName  || '—',                   inline: true  },
+        { name: '📛 Apelido',       value: dados.apelido     || '—',                   inline: true  },
+        { name: '🎂 Idade',         value: dados.idade       || '—',                   inline: true  },
+        { name: '🎮 Plataforma',    value: dados.plataforma  || '—',                   inline: true  },
+        { name: '📣 Como conheceu', value: dados.origem      || '—',                   inline: true  },
+        { name: '📅 Cadastrou em',  value: `<t:${Math.floor(Date.now()/1000)}:F>`,     inline: false },
+      )
+      .setThumbnail(dados.robloxId ? `https://www.roblox.com/headshot-thumbnail/image?userId=${dados.robloxId}&width=150&height=150&format=png` : null)
+      .setFooter({ text: 'Tower Deep · Sistema de Cadastro' })
+      .setTimestamp();
+    await canal.send({ embeds: [embed] });
+  } catch { /* log não crítico */ }
+}
+
+async function carregarCadastros() {
+  try {
+    const dados = await lerCadastros();
+    let restaurados = 0;
+    for (const c of (dados.cadastros || [])) {
+      if (c.etapa === 'concluido') continue;
+      cadastrosPendentes.set(c.discordId, c);
+      restaurados++;
+    }
+    console.log(`📋 Cadastros carregados — ${restaurados} pendente(s)`);
+  } catch (err) { console.error('[CADASTROS] Erro ao carregar:', err.message); }
 }
 
 const lembretes = new Map(); // id → dados do lembrete
@@ -1027,6 +1327,8 @@ async function handleReacaoSorteio(reaction, user) {
 
       if (!sorteio.participantes.includes(user.id)) {
         sorteio.participantes.push(user.id);
+        // XP bônus por participar de sorteio (uma vez por sorteio)
+        await darXPBonus(user.id, 'SORTEIO_PARTICIPOU', user.username).catch(() => {});
 
         // Atualiza embed com novo contador de participantes (debounce simples)
         clearTimeout(sorteio._updateTimeout);
@@ -1322,6 +1624,512 @@ async function handleStats(interaction) {
 }
 
 
+// ─────────────────────────────────────────────────────────────
+// SISTEMA DE ANÚNCIOS AGENDADOS
+// ─────────────────────────────────────────────────────────────
+const anunciosAgendados = new Map(); // id → dados do anúncio
+let anuncioContador = 0;
+
+const TIPOS_ANUNCIO = {
+  update:      { label: '⚡ Update',      cor: 0xc9a84c, emoji: '⚡' },
+  evento:      { label: '🎉 Evento',      cor: 0xff79c6, emoji: '🎉' },
+  manutencao:  { label: '🔧 Manutenção',  cor: 0xff5a5a, emoji: '🔧' },
+  geral:       { label: '📢 Geral',       cor: 0x4a9eff, emoji: '📢' },
+  divino:      { label: '✨ Divino',       cor: 0xa78bfa, emoji: '✨' },
+};
+
+async function lerAnuncios()     { return lerArquivoJsonDoGist('anuncios-agendados.json', { anuncios: [], contador: 0 }); }
+async function salvarAnuncios()  {
+  const lista = [...anunciosAgendados.values()].map(a => {
+    const { _timeout, _timeoutAviso, ...dados } = a; // remove refs de timer antes de serializar
+    return dados;
+  });
+  return salvarArquivoJsonNoGist('anuncios-agendados.json', { anuncios: lista, contador: anuncioContador });
+}
+
+/** Monta o embed final do anúncio */
+function buildEmbedAnuncio(anuncio) {
+  const tipo = TIPOS_ANUNCIO[anuncio.tipo] || TIPOS_ANUNCIO.geral;
+  return new EmbedBuilder()
+    .setColor(tipo.cor)
+    .setTitle(`${tipo.emoji} ${anuncio.titulo}`)
+    .setDescription(anuncio.mensagem)
+    .addFields({ name: '🗓️ Agendado por', value: anuncio.agendadoPor, inline: true })
+    .setFooter({ text: `Tower Deep · ${tipo.label}` })
+    .setTimestamp();
+}
+
+/** Dispara o anúncio no canal configurado */
+async function dispararAnuncio(anuncio) {
+  try {
+    anuncio.status = 'disparado';
+    anuncio.disparadoEm = new Date().toISOString();
+
+    const canalId = anuncio.canalId || CONFIG.CANAL_ANUNCIO_ID;
+    if (!canalId) { console.error(`[ANUNCIO] Canal não configurado para ${anuncio.id}`); return; }
+
+    const canal = await client.channels.fetch(canalId).catch(() => null);
+    if (!canal?.isTextBased()) { console.error(`[ANUNCIO] Canal ${canalId} não encontrado`); return; }
+
+    const embed  = buildEmbedAnuncio(anuncio);
+    const botoes = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setLabel('🌐 Site Oficial').setURL('https://italozkv.github.io/tower-deep/').setStyle(ButtonStyle.Link),
+      new ButtonBuilder().setLabel('📜 Changelog').setURL('https://italozkv.github.io/tower-deep/changelog.html').setStyle(ButtonStyle.Link),
+    );
+
+    const content = anuncio.mencionarEveryone ? '@everyone' : undefined;
+    await canal.send({ content, embeds: [embed], components: [botoes] });
+
+    // Log no canal de tickets
+    if (CONFIG.CANAL_LOG_TICKETS) {
+      try {
+        const log = await client.channels.fetch(CONFIG.CANAL_LOG_TICKETS);
+        if (log?.isTextBased()) {
+          await log.send({ embeds: [new EmbedBuilder()
+            .setColor(0x3dd68c).setTitle('📅 Anúncio Disparado')
+            .addFields(
+              { name: '🆔 ID',          value: anuncio.id,          inline: true },
+              { name: '📌 Título',      value: anuncio.titulo,      inline: true },
+              { name: '👤 Agendado por',value: anuncio.agendadoPor, inline: true },
+            ).setTimestamp()] });
+        }
+      } catch { /* log não crítico */ }
+    }
+
+    console.log(`📢 Anúncio ${anuncio.id} disparado — "${anuncio.titulo}"`);
+    anunciosAgendados.delete(anuncio.id);
+    await salvarAnuncios();
+
+  } catch (err) {
+    console.error(`[ANUNCIO] Erro ao disparar ${anuncio.id}:`, err.message);
+  }
+}
+
+/** Aviso 30 min antes para a staff */
+async function enviarAvisoStaff(anuncio) {
+  try {
+    const canalLog = CONFIG.CANAL_LOG_TICKETS ? await client.channels.fetch(CONFIG.CANAL_LOG_TICKETS).catch(() => null) : null;
+    if (!canalLog?.isTextBased()) return;
+    const dispararTs = Math.floor(new Date(anuncio.dispararEm).getTime() / 1000);
+    await canalLog.send({
+      embeds: [new EmbedBuilder()
+        .setColor(CONFIG.CORES.AVISO)
+        .setTitle('⏰ Anúncio em 30 minutos!')
+        .setDescription(`O anúncio **${anuncio.titulo}** será disparado <t:${dispararTs}:R>.
+Use \`/anuncio cancelar ${anuncio.id}\` para cancelar se necessário.`)
+        .addFields(
+          { name: '🆔 ID',       value: anuncio.id,          inline: true },
+          { name: '📋 Tipo',     value: anuncio.tipo,        inline: true },
+          { name: '📅 Dispara',  value: `<t:${dispararTs}:F>`, inline: true },
+        ).setTimestamp()],
+    });
+  } catch { /* aviso não é crítico */ }
+}
+
+/** Agenda timers em memória para um anúncio */
+function agendarTimers(anuncio) {
+  const msParaDisparar = new Date(anuncio.dispararEm).getTime() - Date.now();
+  const msParaAviso    = msParaDisparar - 30 * 60 * 1000; // 30 min antes
+
+  // Timer do aviso (só se restar mais de 31 min)
+  if (msParaAviso > 60_000) {
+    anuncio._timeoutAviso = setTimeout(() => enviarAvisoStaff(anuncio), msParaAviso);
+  }
+
+  // Timer principal
+  anuncio._timeout = setTimeout(() => dispararAnuncio(anuncio), Math.max(msParaDisparar, 0));
+}
+
+/** Carrega anúncios do Gist e recria timers no boot */
+async function carregarAnuncios() {
+  try {
+    const dados = await lerAnuncios();
+    anuncioContador = dados.contador || 0;
+
+    let reagendados = 0;
+    let atrasados   = 0;
+
+    for (const anuncio of (dados.anuncios || [])) {
+      if (anuncio.status !== 'pendente') continue;
+
+      const msRestantes = new Date(anuncio.dispararEm).getTime() - Date.now();
+
+      if (msRestantes <= 0) {
+        // Passou da hora durante o downtime — dispara imediatamente
+        atrasados++;
+        setImmediate(() => dispararAnuncio(anuncio));
+      } else {
+        agendarTimers(anuncio);
+        anunciosAgendados.set(anuncio.id, anuncio);
+        reagendados++;
+      }
+    }
+
+    console.log(`📅 Anúncios carregados — ${reagendados} agendado(s), ${atrasados} disparado(s) por atraso`);
+  } catch (err) {
+    console.error('[ANUNCIOS] Erro ao carregar:', err.message);
+  }
+}
+
+/** Handler principal /anuncio */
+async function handleAnuncio(interaction) {
+  const sub = interaction.options.getSubcommand();
+
+  // ── AGENDAR ─────────────────────────────────────────────────
+  if (sub === 'agendar') {
+    if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫 *Apenas Admins podem agendar anúncios.*', ephemeral: true });
+
+    const titulo    = interaction.options.getString('titulo');
+    const mensagem  = interaction.options.getString('mensagem');
+    const dataStr   = interaction.options.getString('data');   // YYYY-MM-DD
+    const horaStr   = interaction.options.getString('hora');   // HH:MM
+    const tipo      = interaction.options.getString('tipo')   || 'geral';
+    const mencionar = interaction.options.getBoolean('mencionar') ?? true;
+    const canalOpt  = interaction.options.getString('canal')  || null;
+
+    // Parse de data/hora
+    const dispararEm = new Date(`${dataStr}T${horaStr}:00`);
+    if (isNaN(dispararEm.getTime())) {
+      return interaction.reply({ content: '⚠️ *Data ou hora inválida. Use o formato `AAAA-MM-DD` e `HH:MM`.*', ephemeral: true });
+    }
+    if (dispararEm <= Date.now()) {
+      return interaction.reply({ content: '⚠️ *A data/hora informada já passou, mortal. Os deuses não dominam o passado.*', ephemeral: true });
+    }
+
+    const maxFuturo = 30 * 24 * 60 * 60 * 1000; // 30 dias
+    if (dispararEm - Date.now() > maxFuturo) {
+      return interaction.reply({ content: '⚠️ *Não é possível agendar com mais de 30 dias de antecedência.*', ephemeral: true });
+    }
+
+    const canalId   = canalOpt || CONFIG.CANAL_ANUNCIO_ID;
+    const dispararTs = Math.floor(dispararEm.getTime() / 1000);
+    const tipoInfo   = TIPOS_ANUNCIO[tipo] || TIPOS_ANUNCIO.geral;
+
+    // Prévia do anúncio
+    const embedPrevia = new EmbedBuilder()
+      .setColor(tipoInfo.cor)
+      .setTitle(`${tipoInfo.emoji} ${titulo}`)
+      .setDescription(mensagem)
+      .addFields(
+        { name: '🗓️ Agendado por',  value: interaction.user.tag,       inline: true },
+        { name: '📋 Tipo',           value: tipoInfo.label,             inline: true },
+        { name: '📢 Canal',          value: canalId ? `<#${canalId}>` : '❌ Não configurado', inline: true },
+        { name: '📅 Dispara em',     value: `<t:${dispararTs}:F>`,      inline: true },
+        { name: '⏰ Relativo',        value: `<t:${dispararTs}:R>`,      inline: true },
+        { name: '🔔 @everyone',      value: mencionar ? 'Sim' : 'Não',  inline: true },
+      )
+      .setFooter({ text: 'Prévia do anúncio — confirme ou cancele' })
+      .setTimestamp();
+
+    const id = `ANC-${++anuncioContador}`;
+    const botoesPreviw = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`anuncio_confirmar_${id}`).setLabel('✅ Confirmar').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`anuncio_cancelar_prev_${id}`).setLabel('❌ Cancelar').setStyle(ButtonStyle.Danger),
+    );
+
+    // Guarda rascunho temporário
+    anunciosAgendados.set(`RASCUNHO_${id}`, {
+      id, titulo, mensagem, tipo, canalId, guildId: interaction.guildId,
+      agendadoPor: interaction.user.tag, agendadoPorId: interaction.user.id,
+      agendadoEm: new Date().toISOString(),
+      dispararEm: dispararEm.toISOString(),
+      mencionarEveryone: mencionar,
+      status: 'rascunho',
+    });
+
+    return interaction.reply({ content: '👁️ *Os deuses analisam o decreto...*', embeds: [embedPrevia], components: [botoesPreviw], ephemeral: true });
+  }
+
+  // ── AGORA (substitui /anunciar) ─────────────────────────────
+  if (sub === 'agora') {
+    if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '🚫 *Apenas guardiões podem proclamar decretos.*', ephemeral: true });
+    const titulo    = interaction.options.getString('titulo') || 'Decreto do Olimpo';
+    const mensagem  = interaction.options.getString('mensagem');
+    const tipo      = interaction.options.getString('tipo') || 'geral';
+    const mencionar = interaction.options.getBoolean('mencionar') ?? false;
+    await interaction.reply({ content: '✅ *Teu decreto foi proclamado!*', ephemeral: true });
+    const embed  = buildEmbedAnuncio({ titulo, mensagem, tipo, agendadoPor: interaction.user.tag });
+    const botoes = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setLabel('🌐 Site Oficial').setURL('https://italozkv.github.io/tower-deep/').setStyle(ButtonStyle.Link),
+      new ButtonBuilder().setLabel('📜 Changelog').setURL('https://italozkv.github.io/tower-deep/changelog.html').setStyle(ButtonStyle.Link),
+    );
+    await interaction.channel.send({ content: mencionar ? '@everyone' : undefined, embeds: [embed], components: [botoes] });
+    return;
+  }
+
+  // ── LISTAR ──────────────────────────────────────────────────
+  if (sub === 'listar') {
+    if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '🚫', ephemeral: true });
+    const pendentes = [...anunciosAgendados.values()].filter(a => a.status === 'pendente');
+    if (!pendentes.length) return interaction.reply({ content: '📅 *Nenhum anúncio agendado no momento.*', ephemeral: true });
+
+    const lista = pendentes.map(a => {
+      const ts = Math.floor(new Date(a.dispararEm).getTime() / 1000);
+      const tipo = TIPOS_ANUNCIO[a.tipo] || TIPOS_ANUNCIO.geral;
+      return `${tipo.emoji} \`${a.id}\` — **${a.titulo}** — <t:${ts}:F> *(${a.agendadoPor})*`;
+    }).join('\n');
+
+    return interaction.reply({
+      embeds: [new EmbedBuilder().setColor(CONFIG.CORES.INFO).setTitle('📅 Anúncios Agendados')
+        .setDescription(lista).setFooter({ text: `${pendentes.length} anúncio(s) pendente(s)` })],
+      ephemeral: true,
+    });
+  }
+
+  // ── CANCELAR ────────────────────────────────────────────────
+  if (sub === 'cancelar') {
+    if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫 *Apenas Admins podem cancelar anúncios.*', ephemeral: true });
+    const id      = interaction.options.getString('id').toUpperCase();
+    const anuncio = anunciosAgendados.get(id);
+    if (!anuncio || anuncio.status !== 'pendente') return interaction.reply({ content: `⚠️ *Anúncio \`${id}\` não encontrado ou já disparado.*`, ephemeral: true });
+
+    clearTimeout(anuncio._timeout);
+    clearTimeout(anuncio._timeoutAviso);
+    anunciosAgendados.delete(id);
+    await salvarAnuncios();
+    return interaction.reply({ content: `🗑️ *Anúncio \`${id}\` — **${anuncio.titulo}** cancelado pelos deuses.*`, ephemeral: true });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// SISTEMA DE ENQUETES COM PRAZO
+// ─────────────────────────────────────────────────────────────
+const enquetesAtivas = new Map(); // id → dados da enquete com timer
+
+async function lerEnquetesAtivas()    { return lerArquivoJsonDoGist('enquetes-ativas.json', { enquetes: [], contador: 0 }); }
+async function salvarEnquetesAtivas() {
+  const lista = [...enquetesAtivas.values()].map(({ _timeout, ...d }) => d);
+  return salvarArquivoJsonNoGist('enquetes-ativas.json', { enquetes: lista, contador: enqueteContador });
+}
+
+let enqueteContador = 0;
+
+/** Encerra a enquete, coleta votos reais da reação e posta resultado */
+async function encerrarEnquete(enquete, motivo = 'prazo') {
+  if (enquete._timeout) { clearTimeout(enquete._timeout); enquete._timeout = null; }
+  enquete.status = 'encerrada';
+  enquete.encerradaEm = new Date().toISOString();
+
+  const canal = await client.channels.fetch(enquete.canalId).catch(() => null);
+  if (!canal) { enquetesAtivas.delete(enquete.id); await salvarEnquetesAtivas(); return; }
+
+  // Coleta votos reais da reação ⬆️ na mensagem
+  let votos = 0;
+  try {
+    const msg      = await canal.messages.fetch(enquete.messageId);
+    const reaction = msg.reactions.cache.get('⬆️');
+    if (reaction) {
+      const users = await reaction.users.fetch();
+      votos = users.filter(u => !u.bot).size;
+    }
+    // Atualiza no enquetes.json (usado pelo site votos.html)
+    const listaGist = await lerEnquetes();
+    const idx = listaGist.findIndex(e => e.id === enquete.idGist);
+    if (idx !== -1) {
+      listaGist[idx].votos     = votos;
+      listaGist[idx].encerrada = true;
+      listaGist[idx].encerradaEm = enquete.encerradaEm;
+      await salvarEnquetes(listaGist);
+    }
+  } catch (err) { console.error('[ENQUETE] Erro ao coletar votos:', err.message); }
+
+  enquete.votos = votos;
+
+  // Dá XP ao criador se teve votos
+  if (votos >= 3 && enquete.autorId) {
+    await darXPBonus(enquete.autorId, 'ENQUETE_CRIADA', enquete.autorUsername, canal).catch(() => {});
+  }
+
+  // Embed de resultado
+  const encerradaTs = Math.floor(Date.now() / 1000);
+  const duracaoStr  = formatarTempo(new Date(enquete.encerradaEm) - new Date(enquete.criadaEm));
+  const embedResult = new EmbedBuilder()
+    .setColor(votos >= 10 ? CONFIG.CORES.SUCESSO : votos >= 3 ? CONFIG.CORES.AVISO : CONFIG.CORES.NEUTRO)
+    .setTitle(`🗳️ RESULTADO — ${enquete.titulo}`)
+    .setDescription(
+      `*A urna divina foi selada pelos deuses do Olimpo.*
+
+` +
+      `📝 **${enquete.descricao}**`
+    )
+    .addFields(
+      { name: '⬆️ Votos',      value: `**${votos}**`,                              inline: true },
+      { name: '🏷️ Categoria',  value: enquete.categoria,                            inline: true },
+      { name: '⏱️ Duração',    value: duracaoStr,                                   inline: true },
+      { name: '👤 Proposto por', value: `<@${enquete.autorId}>`,                   inline: true },
+      { name: '🔒 Encerrada',   value: `<t:${encerradaTs}:F>`,                     inline: true },
+      { name: '🌐 Ver resultados', value: 'https://italozkv.github.io/tower-deep/enquetes.html', inline: false },
+    )
+    .setFooter({ text: `Tower Deep · ${motivo === 'prazo' ? 'Encerrada automaticamente' : 'Encerrada pela equipe'}` })
+    .setTimestamp();
+
+  // Veredicto baseado nos votos
+  let veredicto = '';
+  if (votos === 0)     veredicto = '😔 *Nenhum mortal votou nesta proposta...*';
+  else if (votos < 3)  veredicto = '🤔 *Poucos mortais se manifestaram. Os deuses observam com cautela.*';
+  else if (votos < 10) veredicto = '💡 *A proposta despertou interesse! A equipe irá avaliar.*';
+  else if (votos < 25) veredicto = '🔥 *Os mortais clamoram! Esta feature tem grande apoio!*';
+  else                 veredicto = '⚡ *OS DEUSES OUVIRAM! Esta feature é MUITO desejada pela comunidade!*';
+
+  embedResult.addFields({ name: '⚖️ Veredicto dos Deuses', value: veredicto, inline: false });
+
+  // Tenta editar a mensagem original e mandar resultado
+  try {
+    const msg = await canal.messages.fetch(enquete.messageId);
+    const embedEncerrado = new EmbedBuilder()
+      .setColor(CONFIG.CORES.NEUTRO)
+      .setTitle(`🔒 ENQUETE ENCERRADA — ${enquete.titulo}`)
+      .setDescription(`*Esta urna foi selada. Votos finais: **${votos}***
+
+📝 ${enquete.descricao}`)
+      .setFooter({ text: 'Tower Deep · Encerrada' }).setTimestamp();
+    await msg.edit({ content: '', embeds: [embedEncerrado], components: [] });
+  } catch { /* mensagem pode ter sido deletada */ }
+
+  await canal.send({ embeds: [embedResult] });
+
+  console.log(`🗳️ Enquete ${enquete.id} encerrada — ${votos} votos`);
+  enquetesAtivas.delete(enquete.id);
+  await salvarEnquetesAtivas();
+}
+
+/** Carrega enquetes ativas do Gist e recria timers no boot */
+async function carregarEnquetesAtivas() {
+  try {
+    const dados = await lerEnquetesAtivas();
+    enqueteContador = dados.contador || 0;
+    let reagendadas = 0, atrasadas = 0;
+
+    for (const e of (dados.enquetes || [])) {
+      if (e.status !== 'ativa') continue;
+      const msRestantes = new Date(e.encerraEm).getTime() - Date.now();
+      if (msRestantes <= 0) {
+        atrasadas++;
+        setImmediate(() => encerrarEnquete(e, 'prazo'));
+      } else {
+        e._timeout = setTimeout(() => encerrarEnquete(e, 'prazo'), msRestantes);
+        enquetesAtivas.set(e.id, e);
+        reagendadas++;
+      }
+    }
+    console.log(`🗳️ Enquetes carregadas — ${reagendadas} ativa(s), ${atrasadas} encerrada(s) por atraso`);
+  } catch (err) { console.error('[ENQUETES] Erro ao carregar:', err.message); }
+}
+
+/** Handler do comando /enquete com subcomandos */
+async function handleEnquete(interaction) {
+  const sub = interaction.options.getSubcommand();
+
+  // ── CRIAR ──────────────────────────────────────────────────
+  if (sub === 'criar') {
+    if (!temPermissaoModeracao(interaction)) {
+      return interaction.reply({ content: '⚠️ *Apenas guardiões do Olimpo podem proclamar enquetes.*', ephemeral: true });
+    }
+
+    const titulo    = sanitizar(interaction.options.getString('titulo'), 100);
+    const descricao = sanitizar(interaction.options.getString('descricao'), 300);
+    const categoria = interaction.options.getString('categoria');
+    const prazoOpt  = interaction.options.getString('prazo') || '48h';
+
+    // Parse do prazo
+    const msTotal = parseTempo(prazoOpt);
+    if (!msTotal || msTotal < 60_000) {
+      return interaction.reply({ content: '⚠️ *Prazo inválido. Use: `1h`, `24h`, `48h`, `7d`...*', ephemeral: true });
+    }
+    if (msTotal > 30 * 24 * 60 * 60 * 1000) {
+      return interaction.reply({ content: '⚠️ *Prazo máximo: 30 dias.*', ephemeral: true });
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    const id       = `EQ-${++enqueteContador}`;
+    const agora    = new Date().toISOString();
+    const encerraEm = new Date(Date.now() + msTotal).toISOString();
+    const encerraTs  = Math.floor((Date.now() + msTotal) / 1000);
+    const criadaTs   = Math.floor(Date.now() / 1000);
+
+    // Salva no enquetes.json do site (votos.html)
+    const listaGist = await lerEnquetes();
+    const idGist = `e${Date.now()}`;
+    listaGist.push({
+      id: idGist, titulo, desc: descricao, cat: categoria,
+      votos: 0, origem: 'discord', criadoEm: agora,
+      autor: interaction.user.tag, autorId: interaction.user.id,
+      encerrada: false, encerraEm,
+    });
+    await salvarEnquetes(listaGist);
+
+    // Posta no canal
+    const embedEnquete = new EmbedBuilder()
+      .setColor(CONFIG.CORES.PRIMARIA)
+      .setTitle(`🗳️ ENQUETE — ${titulo.toUpperCase()}`)
+      .setDescription(`📝 ${descricao}`)
+      .addFields(
+        { name: '🏷️ Categoria',    value: categoria,                    inline: true },
+        { name: '⏰ Encerra em',   value: `<t:${encerraTs}:R>`,         inline: true },
+        { name: '📅 Data/Hora',    value: `<t:${encerraTs}:F>`,         inline: true },
+        { name: '🆔 ID',           value: `\`${id}\``,                  inline: true },
+        { name: '👤 Proposto por', value: interaction.user.tag,         inline: true },
+      )
+      .setFooter({ text: 'Reaja com ⬆️ para votar · Tower Deep' })
+      .setTimestamp();
+
+    const msg = await interaction.channel.send({ embeds: [embedEnquete] });
+    await msg.react('⬆️');
+
+    // Dados da enquete ativa (em memória + Gist)
+    const enquete = {
+      id, idGist, titulo, descricao, categoria,
+      autorId: interaction.user.id, autorUsername: interaction.user.username,
+      canalId: interaction.channelId, guildId: interaction.guildId,
+      messageId: msg.id, votos: 0,
+      criadaEm: agora, encerraEm,
+      status: 'ativa', _timeout: null,
+    };
+    enquete._timeout = setTimeout(() => encerrarEnquete(enquete, 'prazo'), msTotal);
+    enquetesAtivas.set(id, enquete);
+    await salvarEnquetesAtivas();
+
+    return interaction.editReply({
+      content: `✅ *Enquete proclamada!*
+🆔 **ID:** \`${id}\`
+⏰ **Encerra:** <t:${encerraTs}:R>
+
+Use \`/enquete encerrar id:${id}\` para fechar antes do prazo.`,
+    });
+  }
+
+  // ── ENCERRAR MANUAL ────────────────────────────────────────
+  if (sub === 'encerrar') {
+    if (!temPermissaoModeracao(interaction)) {
+      return interaction.reply({ content: '🚫 *Apenas guardiões podem encerrar enquetes.*', ephemeral: true });
+    }
+    const id = interaction.options.getString('id').toUpperCase();
+    const enquete = enquetesAtivas.get(id);
+    if (!enquete) return interaction.reply({ content: `⚠️ *Enquete \`${id}\` não encontrada ou já encerrada.*`, ephemeral: true });
+    await interaction.deferReply({ ephemeral: true });
+    await encerrarEnquete(enquete, 'manual');
+    return interaction.editReply({ content: `✅ *Enquete \`${id}\` encerrada!*` });
+  }
+
+  // ── LISTAR ─────────────────────────────────────────────────
+  if (sub === 'listar') {
+    const ativas = [...enquetesAtivas.values()];
+    if (!ativas.length) return interaction.reply({ content: '📜 *Nenhuma enquete ativa no momento.*', ephemeral: true });
+    const lista = ativas.map(e => {
+      const ts = Math.floor(new Date(e.encerraEm).getTime() / 1000);
+      return `🗳️ \`${e.id}\` — **${e.titulo}** — encerra <t:${ts}:R>`;
+    }).join('\n');
+    return interaction.reply({
+      embeds: [new EmbedBuilder().setColor(CONFIG.CORES.INFO).setTitle('🗳️ Enquetes Ativas')
+        .setDescription(lista).setFooter({ text: `${ativas.length} enquete(s) em andamento` })],
+      ephemeral: true,
+    });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// SISTEMA DE TOKENS
 // ─────────────────────────────────────────────────────────────
 // SISTEMA DE TOKENS
 // ─────────────────────────────────────────────────────────────
@@ -1647,11 +2455,22 @@ function detectarIntencao(texto) {
   return 'pergunta';
 }
 
+const cooldownIA = new Map();
+const COOLDOWN_IA_MS = 15_000;
+
 async function responderComIA(message, pergunta) {
+  const agora = Date.now();
+  const ultimo = cooldownIA.get(message.author.id) || 0;
+  if (agora - ultimo < COOLDOWN_IA_MS) {
+    const s = Math.ceil((COOLDOWN_IA_MS - (agora - ultimo)) / 1000);
+    return message.reply(`⏳ *O Oráculo ainda medita... Aguarda **${s}s** antes de invocar novamente.*`);
+  }
+  cooldownIA.set(message.author.id, agora);
   const userId   = message.author.id;
   const intencao = detectarIntencao(pergunta);
   if (!historicos.has(userId)) historicos.set(userId, []);
   const historico = historicos.get(userId);
+  historicoTs.set(userId, Date.now());
   const promptsExtras = {
     sugestao: `O jogador está fazendo uma SUGESTÃO.\nAnalise com sabedoria:\n1. Diga se é viável para um Tower Defense\n2. Aponte pontos positivos\n3. Mencione possíveis desafios\n4. Dê uma nota de viabilidade: ★☆☆☆☆ a ★★★★★\n5. Sugira como melhorar a ideia\nSeja construtivo e entusiasmado.`,
     suporte:  `O jogador está com um PROBLEMA ou DÚVIDA TÉCNICA.\nResponda de forma direta:\n1. Identifique o problema\n2. Ofereça a solução mais provável\n3. Se não souber, peça mais detalhes ou oriente a aguardar um moderador\nSeja eficiente — jogadores com problema querem solução rápida.`,
@@ -1997,18 +2816,55 @@ const slashCommands = [
     .addIntegerOption(opt => opt.setName('quantidade').setDescription('Quantas mensagens apagar').setRequired(true)
       .addChoices({ name: 'Últimas 10 mensagens', value: 10 }, { name: 'Últimas 100 mensagens', value: 100 })),
   new SlashCommandBuilder()
-    .setName('anunciar').setDescription('📢 Fazer um anúncio no canal atual')
-    .addStringOption(opt => opt.setName('mensagem').setDescription('O conteúdo do anúncio').setRequired(true))
-    .addStringOption(opt => opt.setName('titulo').setDescription('Título do anúncio (opcional)').setRequired(false)),
+    .setName('anuncio')
+    .setDescription('📢 Sistema de anúncios do Olimpo')
+    .addSubcommand(sub => sub.setName('agendar')
+      .setDescription('📅 Agendar um anúncio para uma data e hora específicas')
+      .addStringOption(opt => opt.setName('titulo').setDescription('Título do anúncio').setRequired(true))
+      .addStringOption(opt => opt.setName('mensagem').setDescription('Conteúdo do anúncio').setRequired(true).setMaxLength(2000))
+      .addStringOption(opt => opt.setName('data').setDescription('Data no formato AAAA-MM-DD (ex: 2026-04-15)').setRequired(true))
+      .addStringOption(opt => opt.setName('hora').setDescription('Hora no formato HH:MM (ex: 18:00)').setRequired(true))
+      .addStringOption(opt => opt.setName('tipo').setDescription('Tipo do anúncio').setRequired(false)
+        .addChoices(
+          { name: '⚡ Update',     value: 'update'     },
+          { name: '🎉 Evento',     value: 'evento'     },
+          { name: '🔧 Manutenção', value: 'manutencao' },
+          { name: '📢 Geral',      value: 'geral'      },
+          { name: '✨ Divino',     value: 'divino'     },
+        ))
+      .addBooleanOption(opt => opt.setName('mencionar').setDescription('Mencionar @everyone? (padrão: sim)').setRequired(false))
+      .addStringOption(opt => opt.setName('canal').setDescription('ID do canal destino (padrão: canal de anúncios)').setRequired(false)))
+    .addSubcommand(sub => sub.setName('agora')
+      .setDescription('📢 Publicar um anúncio imediatamente')
+      .addStringOption(opt => opt.setName('mensagem').setDescription('Conteúdo do anúncio').setRequired(true))
+      .addStringOption(opt => opt.setName('titulo').setDescription('Título do anúncio').setRequired(false))
+      .addStringOption(opt => opt.setName('tipo').setDescription('Tipo do anúncio').setRequired(false)
+        .addChoices(
+          { name: '⚡ Update', value: 'update' }, { name: '🎉 Evento', value: 'evento' },
+          { name: '🔧 Manutenção', value: 'manutencao' }, { name: '📢 Geral', value: 'geral' }, { name: '✨ Divino', value: 'divino' },
+        ))
+      .addBooleanOption(opt => opt.setName('mencionar').setDescription('Mencionar @everyone?').setRequired(false)))
+    .addSubcommand(sub => sub.setName('listar').setDescription('📋 Ver todos os anúncios agendados'))
+    .addSubcommand(sub => sub.setName('cancelar')
+      .setDescription('🗑️ Cancelar um anúncio agendado')
+      .addStringOption(opt => opt.setName('id').setDescription('ID do anúncio (ex: ANC-1)').setRequired(true))),
   new SlashCommandBuilder()
-    .setName('enquete').setDescription('🗳️ Criar enquete vinculada ao site (votos.html)')
-    .addStringOption(opt => opt.setName('titulo').setDescription('Título da feature/enquete').setRequired(true))
-    .addStringOption(opt => opt.setName('descricao').setDescription('Descrição da feature').setRequired(true))
-    .addStringOption(opt => opt.setName('categoria').setDescription('Categoria').setRequired(true)
-      .addChoices(
-        { name: '⚔️ Torre', value: 'torre' },{ name: '🗺️ Mapa', value: 'mapa' },
-        { name: '⚙️ Mecânica', value: 'mecanica' },{ name: '🎉 Evento', value: 'evento' },{ name: '🔧 Outro', value: 'outro' }
-      )),
+    .setName('enquete').setDescription('🗳️ Sistema de enquetes com prazo automático')
+    .addSubcommand(sub => sub.setName('criar')
+      .setDescription('📋 Criar nova enquete com prazo de fechamento automático')
+      .addStringOption(opt => opt.setName('titulo').setDescription('Título da feature/enquete').setRequired(true))
+      .addStringOption(opt => opt.setName('descricao').setDescription('Descrição detalhada').setRequired(true))
+      .addStringOption(opt => opt.setName('categoria').setDescription('Categoria').setRequired(true)
+        .addChoices(
+          { name: '⚔️ Torre', value: 'torre' }, { name: '🗺️ Mapa', value: 'mapa' },
+          { name: '⚙️ Mecânica', value: 'mecanica' }, { name: '🎉 Evento', value: 'evento' }, { name: '🔧 Outro', value: 'outro' }
+        ))
+      .addStringOption(opt => opt.setName('prazo').setDescription('Duração da enquete (ex: 24h, 3d, 48h) — padrão: 48h').setRequired(false)))
+    .addSubcommand(sub => sub.setName('encerrar')
+      .setDescription('🔒 Encerrar uma enquete antes do prazo e postar resultado')
+      .addStringOption(opt => opt.setName('id').setDescription('ID da enquete (ex: EQ-1)').setRequired(true)))
+    .addSubcommand(sub => sub.setName('listar')
+      .setDescription('📋 Listar todas as enquetes ativas')),
   new SlashCommandBuilder()
     .setName('roadmap').setDescription('🗺️ Gerenciar o roadmap do jogo')
     .addSubcommand(sub => sub.setName('adicionar').setDescription('Adicionar nova versão ao roadmap')
@@ -2078,6 +2934,34 @@ const slashCommands = [
   new SlashCommandBuilder().setName('minhaconta').setDescription('👤 Ver sua conta Roblox vinculada e códigos resgatados'),
   new SlashCommandBuilder().setName('itemcadastrar').setDescription('➕ Cadastrar novo item no catálogo de recompensas (Admin)'),
   new SlashCommandBuilder().setName('itemlistar').setDescription('📦 Ver todos os itens do catálogo por categoria (Admin)'),
+
+  new SlashCommandBuilder()
+    .setName('xpbonus')
+    .setDescription('⚡ Conceder XP bônus por ação específica (Equipe+)')
+    .addSubcommand(sub => sub.setName('bug')
+      .setDescription('🐛 Confirmar bug e dar +50 XP ao jogador')
+      .addUserOption(opt => opt.setName('usuario').setDescription('Quem reportou o bug').setRequired(true)))
+    .addSubcommand(sub => sub.setName('sugestao')
+      .setDescription('💡 Aprovar sugestão e dar +30 XP ao jogador')
+      .addUserOption(opt => opt.setName('usuario').setDescription('Quem enviou a sugestão').setRequired(true)))
+    .addSubcommand(sub => sub.setName('manual')
+      .setDescription('🔱 Dar XP manual a um jogador (Admin)')
+      .addUserOption(opt => opt.setName('usuario').setDescription('Jogador a receber XP').setRequired(true))
+      .addIntegerOption(opt => opt.setName('quantidade').setDescription('Quantidade de XP (positivo ou negativo)').setRequired(true))
+      .addStringOption(opt => opt.setName('motivo').setDescription('Motivo do XP manual').setRequired(false))),
+
+  new SlashCommandBuilder()
+    .setName('ajuda')
+    .setDescription('📖 Ver todos os comandos disponíveis')
+    .addStringOption(opt => opt.setName('categoria').setDescription('Categoria de comandos').setRequired(false)
+      .addChoices(
+        { name: '👥 Membros — Comandos gerais', value: 'mortais' },
+        { name: '✨ Oráculo — Como usar a IA',  value: 'oraculo' },
+        { name: '🎉 Sorteios',                  value: 'sorteios' },
+        { name: '📋 Cadastro — Onboarding',     value: 'cadastro' },
+        { name: '🛡️ Equipe & Mods',             value: 'equipe' },
+        { name: '🔱 Administradores',           value: 'admin' },
+      )),
 
   // ── NOVOS COMANDOS ──────────────────────────────────────────
   new SlashCommandBuilder()
@@ -2320,10 +3204,12 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isModalSubmit() && interaction.customId === 'modal_bug') {
-      const bugTitulo = interaction.fields.getTextInputValue('bug_titulo');
-      const bugDesc   = interaction.fields.getTextInputValue('bug_descricao');
+      const bugTitulo = sanitizar(interaction.fields.getTextInputValue('bug_titulo'), 100);
+      const bugDesc   = sanitizar(interaction.fields.getTextInputValue('bug_descricao'), 500);
       const bugVersao = interaction.fields.getTextInputValue('bug_versao') || 'não informado';
       await interaction.reply({ content: '🔱 *Os oráculos registraram tua anomalia nos pergaminhos sagrados. Os deuses-desenvolvedores serão notificados.*', ephemeral: true });
+      // XP bônus por reportar bug
+      await darXPBonus(interaction.user.id, 'BUG_REPORTADO', interaction.user.username).catch(() => {});
       if (CONFIG.CANAL_BUGS_ID) {
         try {
           const canal = await client.channels.fetch(CONFIG.CANAL_BUGS_ID);
@@ -2338,8 +3224,8 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isModalSubmit() && interaction.customId === 'modal_sugestao') {
-      const sugTitulo = interaction.fields.getTextInputValue('sug_titulo');
-      const sugDesc   = interaction.fields.getTextInputValue('sug_descricao');
+      const sugTitulo = sanitizar(interaction.fields.getTextInputValue('sug_titulo'), 100);
+      const sugDesc   = sanitizar(interaction.fields.getTextInputValue('sug_descricao'), 500);
       const rawCat    = (interaction.fields.getTextInputValue('sug_categoria') || '').toLowerCase().trim();
       const sugCat    = ['torre', 'mapa', 'mecanica', 'evento'].includes(rawCat) ? rawCat : 'outro';
       await interaction.deferReply({ ephemeral: true });
@@ -2353,28 +3239,19 @@ client.on('interactionCreate', async (interaction) => {
           `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⬆️ — Apoio esta visão!\n*Vote também em: https://italozkv.github.io/tower-deep/votos.html*`
         );
         await msg.react('⬆️');
-        await interaction.editReply({ content: '🔱 *Tua visão foi gravada nos pergaminhos e já aparece no site!*' });
+        await interaction.editReply({ content: '🔱 *Tua visão foi gravada nos pergaminhos e já aparece no site! (+10 XP por contribuir com o Olimpo)*' });
+        // XP bônus por enviar sugestão
+        await darXPBonus(interaction.user.id, 'SUGESTAO_ENVIADA', interaction.user.username).catch(() => {});
       } catch (err) { console.error('Erro submit sugestao:', err.message); await interaction.editReply({ content: `⚠️ Erro: ${err.message}` }).catch(() => {}); }
       return;
     }
 
     if (interaction.isChatInputCommand() && interaction.commandName === 'enquete') {
-      if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas guardiões do Olimpo podem proclamar enquetes.*', ephemeral: true });
-      const titulo    = interaction.options.getString('titulo');
-      const descricao = interaction.options.getString('descricao');
-      const categoria = interaction.options.getString('categoria');
-      await interaction.deferReply({ ephemeral: true });
-      try {
-        const lista = await lerEnquetes();
-        lista.push({ id: `e${Date.now()}`, titulo, desc: descricao, cat: categoria, votos: 0, origem: 'discord', criadoEm: new Date().toISOString() });
-        await salvarEnquetes(lista);
-        const msg = await interaction.channel.send(
-          `🗳️ **NOVA ENQUETE — ${titulo.toUpperCase()}**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🏷️ **Categoria:** ${categoria}\n📝 ${descricao}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⬆️ — Quero esta feature!\n*Resultados: https://italozkv.github.io/tower-deep/votos.html*`
-        );
-        await msg.react('⬆️');
-        await interaction.editReply({ content: '✅ *Enquete proclamada e salva no site!*' });
-      } catch (err) { console.error('Erro /enquete:', err.message); await interaction.editReply({ content: `⚠️ Erro: ${err.message}` }).catch(() => {}); }
-      return;
+      return handleEnquete(interaction);
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === 'xpbonus') {
+      return handleXPBonus(interaction);
     }
 
     if (interaction.isChatInputCommand() && interaction.commandName === 'limpar') {
@@ -2391,22 +3268,9 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    // /anunciar legado — redirecionado para /anuncio agora
     if (interaction.isChatInputCommand() && interaction.commandName === 'anunciar') {
-      if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Os deuses negam tua solicitação, mortal.*', ephemeral: true });
-      const mensagem = interaction.options.getString('mensagem');
-      const titulo   = interaction.options.getString('titulo') || 'Decreto do Olimpo';
-      await interaction.reply({ content: '✅ *Teu anúncio foi proclamado no canal, guardião.*', ephemeral: true });
-      try {
-        const embedAnuncio = new EmbedBuilder()
-          .setColor(0xc9a84c).setTitle(`📢 ${titulo}`).setDescription(mensagem)
-          .setFooter({ text: `Proclamado por ${interaction.user.username} · Tower Deep` }).setTimestamp();
-        const botoesAnuncio = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setLabel('🌐 Site Oficial').setURL('https://italozkv.github.io/tower-deep/').setStyle(ButtonStyle.Link),
-          new ButtonBuilder().setLabel('📜 Changelog').setURL('https://italozkv.github.io/tower-deep/changelog.html').setStyle(ButtonStyle.Link),
-        );
-        await interaction.channel.send({ embeds: [embedAnuncio], components: [botoesAnuncio] });
-      } catch (err) { console.error('Erro ao anunciar:', err.message); }
-      return;
+      return interaction.reply({ content: '📢 *Este comando foi substituído por `/anuncio agora` e `/anuncio agendar`!*', ephemeral: true });
     }
 
     if (interaction.isChatInputCommand() && interaction.commandName === 'roadmap') {
@@ -2951,6 +3815,17 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isStringSelectMenu() && interaction.customId === 'menu_ajuda') {
       const escolha = interaction.values[0];
+      // Redireciona para o handler do /ajuda reaproveitando a mesma lógica
+      return interaction.deferUpdate().then(() => {
+        return interaction.followUp({
+          embeds: [new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA).setTitle('📖 Grimório').setDescription('Use `/ajuda categoria:' + escolha + '` para ver os comandos detalhados.').setFooter({ text: 'Tower Deep' })],
+          ephemeral: true,
+        });
+      }).catch(() => {});
+    }
+
+    if (interaction.isStringSelectMenu() && interaction.customId === 'menu_ajuda_UNUSED') {
+      const escolha = interaction.values[0];
       const embed   = new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA);
       if (escolha === 'mortais') {
         embed.setTitle('👥 Poderes dos Mortais').setDescription('🐛 `/bug` — Relatar uma anomalia\n💡 `/sugestao` — Enviar visão ao Olimpo\n🏆 `/rank` — Ver teu título divino\n✅ `/verificar` — Vincular conta do Roblox\n🎫 Menu de tickets — Abrir chamado de suporte');
@@ -3002,6 +3877,8 @@ client.on('interactionCreate', async (interaction) => {
       if (sub === 'resolver') {
         if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas staff pode marcar como resolvido.*', ephemeral: true });
         ticket.status = 'resolvido'; ticket.resolvidoPor = interaction.user.tag;
+        // XP bônus ao dono do ticket quando resolvido
+        await darXPBonus(ticket.userId, 'TICKET_RESOLVIDO', ticket.username, interaction.channel).catch(() => {});
         await salvarTickets().catch(() => {});
         const embedResolvido = new EmbedBuilder().setColor(0x3dd68c).setTitle(`✅ Ticket #${ticket.id} Resolvido`)
           .setDescription(`*Os deuses declararam este chamado solucionado.*\n\n**Resolvido por:** ${interaction.user.tag}\n\nO ticket será fechado em breve.`);
@@ -3045,6 +3922,8 @@ client.on('interactionCreate', async (interaction) => {
       if (!ticket) return interaction.reply({ content: '⚠️ *Ticket não encontrado.*', ephemeral: true });
       if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '⚠️ *Apenas staff pode marcar como resolvido.*', ephemeral: true });
       ticket.status = 'resolvido'; ticket.resolvidoPor = interaction.user.tag;
+      // XP bônus ao dono do ticket quando resolvido
+      await darXPBonus(ticket.userId, 'TICKET_RESOLVIDO', ticket.username, interaction.channel).catch(() => {});
       await salvarTickets().catch(() => {});
       const embedResolvido = new EmbedBuilder().setColor(0x3dd68c).setTitle(`✅ Ticket #${ticket.id} Resolvido`)
         .setDescription(`*Os deuses declararam este chamado solucionado.*\n\n**Resolvido por:** ${interaction.user.tag}`);
@@ -3088,6 +3967,294 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    // ── Botão: Iniciar Cadastro ──────────────────────────────
+    if (interaction.isButton() && interaction.customId.startsWith('cadastro_iniciar_')) {
+      const targetId = interaction.customId.replace('cadastro_iniciar_', '');
+      if (interaction.user.id !== targetId)
+        return interaction.reply({ content: '🚫 *Este painel não é para ti, mortal.*', ephemeral: true });
+
+      const modal = new ModalBuilder()
+        .setCustomId(`cadastro_form_${targetId}`)
+        .setTitle('⚡ Ritual de Iniciação — Tower Deep')
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('apelido')
+              .setLabel('Como quer ser chamado no servidor?')
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+              .setMaxLength(32)
+              .setPlaceholder('Ex: Zeus_Master, AresWarrior...')
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('idade')
+              .setLabel('Qual a sua idade?')
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+              .setMaxLength(3)
+              .setPlaceholder('Ex: 17')
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('plataforma')
+              .setLabel('Você joga em qual plataforma?')
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+              .setMaxLength(20)
+              .setPlaceholder('PC / Mobile / Tablet / Console')
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('origem')
+              .setLabel('Como conheceu o Tower Deep?')
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+              .setMaxLength(100)
+              .setPlaceholder('Ex: YouTube, amigo, TikTok, Roblox...')
+          ),
+        );
+      return interaction.showModal(modal);
+    }
+
+    // ── Modal: Formulário de cadastro submetido ───────────────
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('cadastro_form_')) {
+      const targetId = interaction.customId.replace('cadastro_form_', '');
+      if (interaction.user.id !== targetId)
+        return interaction.reply({ content: '🚫', ephemeral: true });
+
+      await interaction.deferUpdate().catch(() => {});
+
+      const apelido   = sanitizar(interaction.fields.getTextInputValue('apelido'), 32);
+      const idade     = interaction.fields.getTextInputValue('idade').trim();
+      const plataforma = interaction.fields.getTextInputValue('plataforma').trim();
+      const origem    = interaction.fields.getTextInputValue('origem').trim();
+
+      // Validação de idade
+      const idadeNum = parseInt(idade);
+      if (isNaN(idadeNum) || idadeNum < 1 || idadeNum > 120) {
+        return interaction.followUp({ content: '⚠️ *Idade inválida, mortal. Informe um número entre 1 e 120.*', ephemeral: true });
+      }
+
+      let dados = cadastrosPendentes.get(targetId);
+      if (!dados) {
+        // Cria entrada caso não exista (edge case)
+        dados = { discordId: targetId, username: interaction.user.tag, guildId: interaction.guildId, etapa: 'aguardando_vinculo', iniciadoEm: new Date().toISOString() };
+        cadastrosPendentes.set(targetId, dados);
+      }
+
+      dados.apelido    = apelido;
+      dados.idade      = idade;
+      dados.plataforma = plataforma;
+      dados.origem     = origem;
+      dados.etapa      = 'aguardando_vinculo';
+      await salvarCadastros();
+
+      // Atualiza painel no canal
+      await atualizarPainelCadastro(dados, 'aguardando_vinculo', {
+        avatar: interaction.user.displayAvatarURL({ dynamic: true }),
+      });
+
+      return interaction.followUp({
+        content: '✅ *Formulário recebido, mortal!*\n\nAgora usa o comando `/vincular SeuUserRoblox` neste canal.\nDepois clica em **Verificar Vínculo** no painel acima.',
+        ephemeral: true,
+      });
+    }
+
+    // ── Botão: Verificar Vínculo Roblox ──────────────────────
+    if (interaction.isButton() && interaction.customId.startsWith('cadastro_verificar_')) {
+      const targetId = interaction.customId.replace('cadastro_verificar_', '');
+      if (interaction.user.id !== targetId)
+        return interaction.reply({ content: '🚫 *Este painel não é para ti, mortal.*', ephemeral: true });
+
+      await interaction.deferReply({ ephemeral: true });
+
+      const dados = cadastrosPendentes.get(targetId);
+      if (!dados || dados.etapa === 'aguardando_cadastro') {
+        return interaction.editReply({ content: '⚠️ *Preencha o formulário primeiro, mortal. Clique em **Iniciar Cadastro**.*' });
+      }
+
+      // Verifica se tem vínculo Roblox
+      const db      = await lerVinculos();
+      const vinculo = db.vinculos.find(v => v.discordId === targetId);
+      if (!vinculo) {
+        return interaction.editReply({
+          content: '⚠️ *Conta Roblox não vinculada ainda, mortal!*\n\nUse `/vincular SeuUserRoblox` e tente novamente.',
+        });
+      }
+
+      // Tudo OK — libera cargo MEMBRO e remove PENDENTE
+      try {
+        const guild  = interaction.guild;
+        const member = await guild.members.fetch(targetId);
+
+        // Adiciona MEMBRO
+        const cargoMembro = guild.roles.cache.get(CONFIG.CARGO_MEMBRO);
+        if (cargoMembro) await member.roles.add(cargoMembro);
+        // XP bônus por completar cadastro
+        await darXPBonus(targetId, 'CADASTRO_COMPLETO', interaction.user.username).catch(() => {});
+
+        // Remove PENDENTE
+        if (CONFIG.CARGO_PENDENTE) {
+          const cargoPendente = guild.roles.cache.get(CONFIG.CARGO_PENDENTE);
+          if (cargoPendente) await member.roles.remove(cargoPendente).catch(() => {});
+        }
+
+        // Adiciona VERIFICADO se configurado
+        if (CONFIG.CARGO_VERIFICADO) {
+          const cargoVerif = guild.roles.cache.get(CONFIG.CARGO_VERIFICADO);
+          if (cargoVerif) await member.roles.add(cargoVerif).catch(() => {});
+        }
+
+        // Atualiza dados do cadastro
+        dados.etapa       = 'concluido';
+        dados.robloxId    = vinculo.robloxId;
+        dados.robloxName  = vinculo.robloxName;
+        dados.concluidoEm = new Date().toISOString();
+        await salvarCadastros();
+
+        // Atualiza painel visual
+        await atualizarPainelCadastro(dados, 'concluido', {
+          avatar: member.user.displayAvatarURL({ dynamic: true }),
+        });
+
+        // Remove painel após 30s
+        setTimeout(async () => {
+          try {
+            const canalPainel = await client.channels.fetch(dados.canalId);
+            const msgPainel   = await canalPainel.messages.fetch(dados.messageId);
+            await msgPainel.delete();
+          } catch { /* mensagem pode já ter sido deletada */ }
+          cadastrosPendentes.delete(targetId);
+        }, 30_000);
+
+        // Log para staff
+        await logCadastroStaff(guild, dados);
+
+        // DM de boas-vindas completa
+        try {
+          await interaction.user.send([
+            `🏆 **SEU RITUAL DE INICIAÇÃO FOI CONCLUÍDO, ${dados.apelido || interaction.user.username.toUpperCase()}!**`,
+            '','━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+            `*Os deuses do Olimpo te reconhecem, mortal.*`,
+            '',
+            `🔱 Você agora é um **Membro do Olimpo** e tem acesso a todos os canais!`,
+            `🕹️ Conta Roblox vinculada: **${vinculo.robloxName}**`,
+            `🎁 Já podes resgatar códigos de recompensa no jogo!`,
+            '',
+            '🌐 **Site oficial:** https://italozkv.github.io/tower-deep/',
+            '📖 **Wiki:** https://italozkv.github.io/tower-deep/wiki.html',
+            '','━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+            '*Que os deuses do Olimpo guiem teus passos!* ⚡',
+          ].join('\n'));
+        } catch { /* DMs bloqueadas */ }
+
+        return interaction.editReply({
+          content: `🏆 *Cadastro concluído! Bem-vindo ao Olimpo, **${dados.apelido || interaction.user.username}**!*
+
+Seu cargo de Membro foi liberado. Aproveite todos os canais! 🔱`,
+        });
+
+      } catch (err) {
+        console.error('[CADASTRO] Erro ao finalizar cadastro:', err.message);
+        return interaction.editReply({ content: '⚠️ *Erro ao liberar acesso. Contate um moderador.*' });
+      }
+    }
+
+    // ── /ajuda ───────────────────────────────────────────────
+    if (interaction.isChatInputCommand() && interaction.commandName === 'ajuda') {
+      const cat    = interaction.options.getString('categoria') || null;
+      const mb     = interaction.member;
+      const isDono = ehDono(mb); const isAdmin = ehAdmin(mb); const isMod = ehMod(mb); const isEq = ehEquipe(mb);
+      const nivel  = isDono ? '👑 Dono' : isAdmin ? '🔱 Admin' : isMod ? '⚔️ Mod' : isEq ? '🛡️ Equipe' : '👥 Membro';
+
+      const AJUDA = {
+        mortais: new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA).setTitle('👥 Comandos — Membros')
+          .setDescription('🐛 `/bug` — Reportar anomalia\n💡 `/sugestao` — Enviar ideia\n🏆 `/rank` — Ver XP e título\n🃏 `/perfil [@user]` — Card do jogador\n🔗 `/vincular <user>` — Vincular Roblox\n👤 `/minhaconta` — Sua conta Roblox\n⏰ `/lembrete <tempo> <msg>` — Lembrete via DM\n📊 `/stats jogador [@user]` — Estatísticas\n🎫 `/ticket` — Abrir suporte\n📖 `/ajuda [cat]` — Este menu'),
+        oraculo: new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA).setTitle('✨ O Oráculo — IA')
+          .setDescription('Mencione o bot em qualquer canal:\n\n`@Bot qual torre é melhor?`\n`@Bot tenho um bug`\n`@Bot sugestão: adicionar torre X`\n`@Bot como funciona Bênção Divina?`\n\n⏱️ *Cooldown de 15s por usuário*'),
+        sorteios: new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA).setTitle('🎉 Sorteios')
+          .setDescription('`/sorteio criar` — Criar sorteio (Mod+)\n`/sorteio encerrar id:` — Sortear vencedor\n`/sorteio cancelar id:` — Cancelar\n`/sorteio listar` — Ver ativos\n\nParticipe reagindo com 🎉 na mensagem!'),
+        cadastro: new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA).setTitle('📋 Onboarding')
+          .setDescription('**Fluxo automático de entrada:**\n1️⃣ Entra → cargo Pendente\n2️⃣ Painel no canal de cadastro → botão Iniciar\n3️⃣ Modal: apelido, idade, plataforma, origem\n4️⃣ `/vincular SeuUser` → Verificar Vínculo\n5️⃣ Cargo Membro liberado\n\nVars: `CANAL_CADASTRO` `CARGO_PENDENTE`'),
+        equipe:   new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA).setTitle('🛡️ Equipe & Mods')
+          .setDescription('`!token` · `!update` · `!listar` · `!revogar`\n`/enquete` · `/limpar` · `/anuncio agora/listar`\n`/sorteio criar/encerrar/cancelar/listar`\n`/stats servidor` · `/ticket painel/listar/assumir/fechar/resolver`'),
+        admin:    new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA).setTitle('🔱 Administradores')
+          .setDescription('`!editar N campo val` · `!apagar N`\n`/changelog listar/apagar/editar/imagem`\n`/roadmap adicionar/item/concluir/status`\n`/anuncio agendar/cancelar`\n`/gencodigo` · `/codigo listar/desativar/info`\n`/itemcadastrar` · `/itemlistar`'),
+      };
+
+      if (cat) {
+        if ((cat === 'equipe') && !isEq)  return interaction.reply({ content: '🚫 *Acesso negado.*', ephemeral: true });
+        if ((cat === 'admin')  && !isAdmin) return interaction.reply({ content: '🚫 *Acesso negado.*', ephemeral: true });
+        const e = AJUDA[cat];
+        if (!e) return interaction.reply({ content: '⚠️ Categoria inválida.', ephemeral: true });
+        return interaction.reply({ embeds: [e.setFooter({ text: 'Tower Deep · /ajuda' }).setTimestamp()], ephemeral: true });
+      }
+
+      // Menu geral com select
+      const embedGeral = new EmbedBuilder().setColor(CONFIG.CORES.PRIMARIA)
+        .setTitle('📖 GRIMÓRIO DO OLIMPO — Comandos')
+        .setDescription(`*Acesso: **${nivel}** — Selecione uma categoria abaixo*`)
+        .addFields(
+          { name: '👥 Membros', value: '/bug · /sugestao · /rank · /perfil · /vincular · /lembrete · /stats · /ticket', inline: false },
+          { name: '✨ Oráculo', value: 'Mencione o bot para consultar a IA', inline: false },
+          { name: '🎉 Sorteios', value: '/sorteio criar/encerrar/cancelar/listar', inline: false },
+          { name: '📋 Cadastro', value: 'Fluxo automático de onboarding de novos membros', inline: false },
+        )
+        .setFooter({ text: 'Tower Deep · /ajuda categoria: para detalhes diretos' }).setTimestamp();
+
+      const opcoes = [
+        new StringSelectMenuOptionBuilder().setLabel('👥 Membros').setValue('mortais').setDescription('Comandos para todos'),
+        new StringSelectMenuOptionBuilder().setLabel('✨ Oráculo').setValue('oraculo').setDescription('Como usar a IA'),
+        new StringSelectMenuOptionBuilder().setLabel('🎉 Sorteios').setValue('sorteios').setDescription('Sistema de sorteios'),
+        new StringSelectMenuOptionBuilder().setLabel('📋 Cadastro').setValue('cadastro').setDescription('Onboarding de membros'),
+      ];
+      if (isEq)    opcoes.push(new StringSelectMenuOptionBuilder().setLabel('🛡️ Equipe').setValue('equipe').setDescription('Staff & Mods'));
+      if (isAdmin) opcoes.push(new StringSelectMenuOptionBuilder().setLabel('🔱 Admins').setValue('admin').setDescription('Administração'));
+
+      const menu = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder().setCustomId('menu_ajuda').setPlaceholder('📖 Escolha uma categoria...').addOptions(opcoes)
+      );
+      return interaction.reply({ embeds: [embedGeral], components: [menu], ephemeral: true });
+    }
+
+    // ── /anuncio ─────────────────────────────────────────────
+    if (interaction.isChatInputCommand() && interaction.commandName === 'anuncio') {
+      return handleAnuncio(interaction);
+    }
+
+    // ── Botão confirmar anúncio agendado ─────────────────────
+    if (interaction.isButton() && interaction.customId.startsWith('anuncio_confirmar_')) {
+      const id      = interaction.customId.replace('anuncio_confirmar_', '');
+      const rascunho = anunciosAgendados.get(`RASCUNHO_${id}`);
+      if (!rascunho) return interaction.reply({ content: '⚠️ *Rascunho expirado. Use /anuncio agendar novamente.*', ephemeral: true });
+
+      // Move rascunho → pendente
+      anunciosAgendados.delete(`RASCUNHO_${id}`);
+      rascunho.status = 'pendente';
+      agendarTimers(rascunho);
+      anunciosAgendados.set(id, rascunho);
+      await salvarAnuncios();
+
+      const dispararTs = Math.floor(new Date(rascunho.dispararEm).getTime() / 1000);
+      await interaction.update({
+        content: `✅ *Decreto agendado pelos deuses!*
+🆔 **ID:** \`${id}\`
+📅 **Dispara:** <t:${dispararTs}:F> *(daqui <t:${dispararTs}:R>)*
+
+Use \`/anuncio cancelar ${id}\` para cancelar.`,
+        embeds: [], components: [],
+      });
+      return;
+    }
+
+    // ── Botão cancelar prévia de anúncio ─────────────────────
+    if (interaction.isButton() && interaction.customId.startsWith('anuncio_cancelar_prev_')) {
+      const id = interaction.customId.replace('anuncio_cancelar_prev_', '');
+      anunciosAgendados.delete(`RASCUNHO_${id}`);
+      return interaction.update({ content: '🗑️ *Anúncio descartado. Os deuses silenciaram.*', embeds: [], components: [] });
+    }
+
     // ── /perfil ──────────────────────────────────────────────
     if (interaction.isChatInputCommand() && interaction.commandName === 'perfil') {
       return handlePerfil(interaction);
@@ -3125,49 +4292,55 @@ client.once('ready', async () => {
   await registrarSlashCommands(client.user.id);
   await carregarXP();
   await carregarTickets();
+  await carregarAnuncios();
+  await carregarCadastros();
+  await carregarEnquetesAtivas();
   console.log(`🤖 IA (Oráculo):    ${CONFIG.GROK_KEY ? '✅ Ativada (Grok)' : '❌ DESATIVADA — adicione GROK_KEY'}`);
   console.log(`📜 Canal updates:   ${CONFIG.CANAL_UPDATE_ID  || '❌ não configurado'}`);
   console.log(`📢 Canal anúncios:  ${CONFIG.CANAL_ANUNCIO_ID || '❌ não configurado'}`);
   console.log(`🐛 Canal bugs:      ${CONFIG.CANAL_BUGS_ID    || '❌ não configurado'}`);
   console.log(`🎫 Categoria tickets: ${CONFIG.CATEGORIA_TICKETS || '❌ não configurado'}`);
   console.log(`📋 Log de tickets:  ${CONFIG.CANAL_LOG_TICKETS || '❌ não configurado'}`);
-  console.log(`🔑 Token cargos:    Dono=${CONFIG.CARGO_DONO ? '✅' : '❌'} Admin=${CONFIG.CARGO_ADMIN ? '✅' : '❌'} Mod=${CONFIG.CARGO_MOD ? '✅' : '❌'} Equipe=${CONFIG.CARGO_EQUIPE ? '✅' : '❌'}\n`);
+  console.log(`🔑 Token cargos:    Dono=${CONFIG.CARGO_DONO ? '✅' : '❌'} Admin=${CONFIG.CARGO_ADMIN ? '✅' : '❌'} Mod=${CONFIG.CARGO_MOD ? '✅' : '❌'} Equipe=${CONFIG.CARGO_EQUIPE ? '✅' : '❌'}`);
+  console.log(`📋 Canal cadastro:  ${CONFIG.CANAL_CADASTRO || '❌ não configurado'}`);
+  console.log(`📋 Log cadastro:    ${CONFIG.CANAL_LOG_CADASTRO || '❌ não configurado'}`);
+  console.log(`🔒 Cargo pendente:  ${CONFIG.CARGO_PENDENTE || '❌ não configurado (recomendado)'}`);
+  console.log(`🗳️ Enquetes ativas: ${enquetesAtivas.size} carregada(s)\n`);
 });
 
 // ─────────────────────────────────────────────────────────────
 // BOAS-VINDAS
 // ─────────────────────────────────────────────────────────────
 client.on('guildMemberAdd', async (member) => {
+  // ── 1. Atribuir cargo PENDENTE (sem acesso a canais) ────────
   try {
-    const cargo = member.guild.roles.cache.get(CONFIG.CARGO_MEMBRO);
-    if (cargo) {
-      await member.roles.add(cargo);
-      console.log(`✅ Cargo "${cargo.name}" atribuído a ${member.user.tag}`);
-    } else {
-      console.warn(`⚠️ Cargo CARGO_MEMBRO (${CONFIG.CARGO_MEMBRO}) não encontrado no servidor.`);
+    if (CONFIG.CARGO_PENDENTE) {
+      const cargoPendente = member.guild.roles.cache.get(CONFIG.CARGO_PENDENTE);
+      if (cargoPendente) await member.roles.add(cargoPendente);
     }
-  } catch (err) { console.error(`❌ Erro ao atribuir cargo a ${member.user.tag}:`, err.message); }
+  } catch (err) { console.error(`[ONBOARDING] Erro ao dar cargo pendente a ${member.user.tag}:`, err.message); }
 
+  // ── 2. Postar painel de cadastro no canal configurado ────────
   try {
-    const dm      = await member.createDM();
+    await enviarPainelCadastro(member);
+  } catch (err) { console.error(`[ONBOARDING] Erro ao enviar painel para ${member.user.tag}:`, err.message); }
+
+  // ── 3. DM de boas-vindas ─────────────────────────────────────
+  try {
     const botName = member.guild.members.me?.user.username || 'Bot';
-    await dm.send([
+    await member.send([
       `⚡ **OS DEUSES DO OLIMPO NOTARAM SUA CHEGADA, ${member.user.username}!** ⚡`,
-      '','━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━','*Um novo mortal adentra os salões sagrados...*','',
-      `Você foi convocado para o servidor oficial do **Tower Deep** — o Tower Defense de deuses gregos no Roblox.`,
-      '','🏛️ **O que os deuses te permitem aqui:**',
-      '> ⚔️ Enfrentar as hostes do Tártaro e deixar sua marca',
-      '> 🗳️ Votar nos decretos futuros do Olimpo',
-      '> 📜 Acompanhar os decretos divinos',
-      `> 🔮 Consultar o Oráculo (@${botName}) para sabedoria sobre o jogo`,
-      '','🌐 **Site oficial:** https://italozkv.github.io/tower-deep/',
-      '📖 **Wiki:** https://italozkv.github.io/tower-deep/wiki.html',
-      '📜 **Changelog:** https://italozkv.github.io/tower-deep/changelog.html',
-      '🗳️ **Votar em features:** https://italozkv.github.io/tower-deep/votos.html',
       '','━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-      '*Que Zeus ilumine teu caminho e Ares fortaleça teu braço, mortal.* 🔱',
+      '*Um novo mortal adentra os salões sagrados...*','',
+      'Para acessar os canais do servidor, complete o **Ritual de Iniciação**:',
+      '> 📋 Preencha o formulário de cadastro',
+      '> 🔗 Vincule sua conta Roblox com `/vincular`',
+      '> ✅ Clique em **Verificar Vínculo** para liberar o acesso',
+      '','*O painel de cadastro foi aberto no servidor. Todo o processo leva menos de 2 minutos!*',
+      '','━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      '*Que Zeus ilumine teu caminho, mortal.* 🔱',
     ].join('\n'));
-  } catch (err) { console.error(`Não foi possível enviar DM para ${member.user.tag}:`, err.message); }
+  } catch { /* DMs podem estar bloqueadas */ }
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -3244,21 +4417,25 @@ client.on('messageCreate', async (message) => {
     }
 
     if (texto === '!ajuda') {
-      const member = await getMember(message);
+      const member   = await getMember(message);
       const isDono   = ehDono(member);
       const isAdmin  = ehAdmin(member);
       const isMod    = ehMod(member);
       const isEquipe = ehEquipe(member);
-
-      let msg = '🔱 **GRIMÓRIO DO OLIMPO — Poderes Disponíveis**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
-      msg += '👥 **Para todos os mortais**\n🐛 `/bug` · 💡 `/sugestao` · 🏆 `/rank` · 🎫 Tickets\n\n';
-      if (isEquipe) msg += '🛡️ **Equipe+**\n🔑 `!token` · 📋 `!listar` · 🎫 `/ticket listar/assumir`\n\n';
-      if (isMod) msg += '⚔️ **Moderadores+**\n📜 `!update` · 🗳️ `/enquete` · 🧹 `/limpar` · 📢 `/anunciar` · 🎫 `/ticket painel/fechar/resolver`\n\n';
-      if (isAdmin) msg += '🔱 **Admins+**\n✏️ `!editar/!apagar` · 📜 `/changelog` · 🗺️ `/roadmap` · 🎁 `/gencodigo` · 🚫 `!revogar`\n\n';
-      if (isDono) msg += '👑 **Dono**\nAcesso total ao painel do site\n\n';
-      msg += '✨ **O Oráculo** — mencione o bot para consultar!\n';
-      msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Logado como: ${isDono ? '👑 Dono' : isAdmin ? '🔱 Admin' : isMod ? '⚔️ Moderador' : isEquipe ? '🛡️ Equipe' : '👥 Mortal'}*`;
-      return message.reply(msg);
+      const nivel    = isDono ? '👑 Dono' : isAdmin ? '🔱 Admin' : isMod ? '⚔️ Moderador' : isEquipe ? '🛡️ Equipe' : '👥 Mortal';
+      const embed = new EmbedBuilder()
+        .setColor(CONFIG.CORES.PRIMARIA)
+        .setTitle('🔱 GRIMÓRIO DO OLIMPO — Comandos')
+        .setDescription(`*Nível de acesso: **${nivel}***`)
+        .addFields(
+          { name: '👥 Todos', value: '`/bug` · `/sugestao` · `/rank` · `/perfil` · `/vincular` · `/minhaconta` · `/lembrete` · `/stats jogador` · `/ticket` · `/ajuda`', inline: false },
+        );
+      if (isEquipe) embed.addFields({ name: '🛡️ Equipe+', value: '`!token` · `!listar` · `/enquete` · `/limpar` · `/anuncio agora` · `/sorteio criar/encerrar` · `/stats servidor` · `/ticket painel/listar`', inline: false });
+      if (isMod)    embed.addFields({ name: '⚔️ Mods+',   value: '`!update` · `/anuncio agendar/listar` · `/sorteio cancelar` · `/ticket fechar/resolver/assumir`', inline: false });
+      if (isAdmin)  embed.addFields({ name: '🔱 Admins+', value: '`!editar` · `!apagar` · `!revogar` · `/changelog` · `/roadmap` · `/gencodigo` · `/codigo` · `/itemcadastrar` · `/itemlistar` · `/anuncio cancelar`', inline: false });
+      embed.addFields({ name: '✨ Oráculo', value: 'Mencione o bot em qualquer canal · `/ajuda categoria:oraculo` para detalhes', inline: false });
+      embed.setFooter({ text: 'Use /ajuda para versão slash com detalhes por categoria' }).setTimestamp();
+      return message.reply({ embeds: [embed] });
     }
   }
 
