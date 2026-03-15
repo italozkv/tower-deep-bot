@@ -1638,6 +1638,80 @@ const TIPOS_ANUNCIO = {
   divino:      { label: '✨ Divino',       cor: 0xa78bfa, emoji: '✨' },
 };
 
+const FUSO_ANUNCIO = 'America/Sao_Paulo';
+const ROTULO_FUSO_ANUNCIO = 'Horário de Brasília (America/Sao_Paulo)';
+
+function formatarPartesEmFuso(date, timeZone = FUSO_ANUNCIO) {
+  const dtf = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+
+  const partes = {};
+  for (const parte of dtf.formatToParts(date)) {
+    if (parte.type !== 'literal') partes[parte.type] = parte.value;
+  }
+  return partes;
+}
+
+function obterOffsetDoFusoMs(date, timeZone = FUSO_ANUNCIO) {
+  const partes = formatarPartesEmFuso(date, timeZone);
+  const utcEquivalente = Date.UTC(
+    Number(partes.year),
+    Number(partes.month) - 1,
+    Number(partes.day),
+    Number(partes.hour),
+    Number(partes.minute),
+    Number(partes.second),
+  );
+  return utcEquivalente - date.getTime();
+}
+
+function criarDataNoFusoBrasil(dataStr, horaStr) {
+  const dataValida = /^\d{4}-\d{2}-\d{2}$/.test(dataStr);
+  const horaValida = /^\d{2}:\d{2}$/.test(horaStr);
+  if (!dataValida || !horaValida) return null;
+
+  const [ano, mes, dia] = dataStr.split('-').map(Number);
+  const [hora, minuto] = horaStr.split(':').map(Number);
+
+  if (
+    !Number.isInteger(ano) || !Number.isInteger(mes) || !Number.isInteger(dia) ||
+    !Number.isInteger(hora) || !Number.isInteger(minuto) ||
+    mes < 1 || mes > 12 || dia < 1 || dia > 31 ||
+    hora < 0 || hora > 23 || minuto < 0 || minuto > 59
+  ) {
+    return null;
+  }
+
+  const palpiteUtc = Date.UTC(ano, mes - 1, dia, hora, minuto, 0);
+  let data = new Date(palpiteUtc);
+
+  let offset = obterOffsetDoFusoMs(data, FUSO_ANUNCIO);
+  data = new Date(palpiteUtc - offset);
+
+  const offsetRecalculado = obterOffsetDoFusoMs(data, FUSO_ANUNCIO);
+  if (offsetRecalculado != offset) {
+    data = new Date(palpiteUtc - offsetRecalculado);
+  }
+
+  const partesConfirmadas = formatarPartesEmFuso(data, FUSO_ANUNCIO);
+  const confere =
+    Number(partesConfirmadas.year) === ano &&
+    Number(partesConfirmadas.month) === mes &&
+    Number(partesConfirmadas.day) === dia &&
+    Number(partesConfirmadas.hour) === hora &&
+    Number(partesConfirmadas.minute) === minuto;
+
+  return confere ? data : null;
+}
+
 async function lerAnuncios()     { return lerArquivoJsonDoGist('anuncios-agendados.json', { anuncios: [], contador: 0 }); }
 async function salvarAnuncios()  {
   const lista = [...anunciosAgendados.values()].map(a => {
@@ -1781,23 +1855,29 @@ async function handleAnuncio(interaction) {
 
     const titulo    = interaction.options.getString('titulo');
     const mensagem  = interaction.options.getString('mensagem');
-    const dataStr   = interaction.options.getString('data');   // YYYY-MM-DD
-    const horaStr   = interaction.options.getString('hora');   // HH:MM
+    const dataStr   = interaction.options.getString('data');   // YYYY-MM-DD (Brasília)
+    const horaStr   = interaction.options.getString('hora');   // HH:MM (Brasília)
     const tipo      = interaction.options.getString('tipo')   || 'geral';
     const mencionar = interaction.options.getBoolean('mencionar') ?? true;
     const canalOpt  = interaction.options.getString('canal')  || null;
 
-    // Parse de data/hora
-    const dispararEm = new Date(`${dataStr}T${horaStr}:00`);
-    if (isNaN(dispararEm.getTime())) {
-      return interaction.reply({ content: '⚠️ *Data ou hora inválida. Use o formato `AAAA-MM-DD` e `HH:MM`.*', ephemeral: true });
+    // Parse de data/hora no fuso do Brasil
+    const dispararEm = criarDataNoFusoBrasil(dataStr, horaStr);
+    if (!dispararEm) {
+      return interaction.reply({
+        content: '⚠️ *Data ou hora inválida. Use `AAAA-MM-DD` e `HH:MM` no horário de Brasília. Ex.: `2026-04-15` e `18:00`.*',
+        ephemeral: true,
+      });
     }
-    if (dispararEm <= Date.now()) {
-      return interaction.reply({ content: '⚠️ *A data/hora informada já passou, mortal. Os deuses não dominam o passado.*', ephemeral: true });
+    if (dispararEm.getTime() <= Date.now()) {
+      return interaction.reply({
+        content: '⚠️ *A data/hora informada já passou no horário de Brasília, mortal. Os deuses não dominam o passado.*',
+        ephemeral: true,
+      });
     }
 
     const maxFuturo = 30 * 24 * 60 * 60 * 1000; // 30 dias
-    if (dispararEm - Date.now() > maxFuturo) {
+    if (dispararEm.getTime() - Date.now() > maxFuturo) {
       return interaction.reply({ content: '⚠️ *Não é possível agendar com mais de 30 dias de antecedência.*', ephemeral: true });
     }
 
@@ -1811,14 +1891,16 @@ async function handleAnuncio(interaction) {
       .setTitle(`${tipoInfo.emoji} ${titulo}`)
       .setDescription(mensagem)
       .addFields(
-        { name: '🗓️ Agendado por',  value: interaction.user.tag,       inline: true },
-        { name: '📋 Tipo',           value: tipoInfo.label,             inline: true },
-        { name: '📢 Canal',          value: canalId ? `<#${canalId}>` : '❌ Não configurado', inline: true },
-        { name: '📅 Dispara em',     value: `<t:${dispararTs}:F>`,      inline: true },
-        { name: '⏰ Relativo',        value: `<t:${dispararTs}:R>`,      inline: true },
-        { name: '🔔 @everyone',      value: mencionar ? 'Sim' : 'Não',  inline: true },
+        { name: '🗓️ Agendado por',   value: interaction.user.tag,       inline: true },
+        { name: '📋 Tipo',            value: tipoInfo.label,             inline: true },
+        { name: '📢 Canal',           value: canalId ? `<#${canalId}>` : '❌ Não configurado', inline: true },
+        { name: '🇧🇷 Horário base',    value: ROTULO_FUSO_ANUNCIO,       inline: true },
+        { name: '🕒 Horário informado',value: `\`${dataStr} ${horaStr}\``, inline: true },
+        { name: '📅 Dispara em',      value: `<t:${dispararTs}:F>`,      inline: true },
+        { name: '⏰ Relativo',         value: `<t:${dispararTs}:R>`,      inline: true },
+        { name: '🔔 @everyone',       value: mencionar ? 'Sim' : 'Não',  inline: true },
       )
-      .setFooter({ text: 'Prévia do anúncio — confirme ou cancele' })
+      .setFooter({ text: 'Prévia do anúncio — horário de Brasília' })
       .setTimestamp();
 
     const id = `ANC-${++anuncioContador}`;
@@ -2822,8 +2904,8 @@ const slashCommands = [
       .setDescription('📅 Agendar um anúncio para uma data e hora específicas')
       .addStringOption(opt => opt.setName('titulo').setDescription('Título do anúncio').setRequired(true))
       .addStringOption(opt => opt.setName('mensagem').setDescription('Conteúdo do anúncio').setRequired(true).setMaxLength(2000))
-      .addStringOption(opt => opt.setName('data').setDescription('Data no formato AAAA-MM-DD (ex: 2026-04-15)').setRequired(true))
-      .addStringOption(opt => opt.setName('hora').setDescription('Hora no formato HH:MM (ex: 18:00)').setRequired(true))
+      .addStringOption(opt => opt.setName('data').setDescription('Data no formato AAAA-MM-DD no horário de Brasília (ex: 2026-04-15)').setRequired(true))
+      .addStringOption(opt => opt.setName('hora').setDescription('Hora no formato HH:MM no horário de Brasília (ex: 18:00)').setRequired(true))
       .addStringOption(opt => opt.setName('tipo').setDescription('Tipo do anúncio').setRequired(false)
         .addChoices(
           { name: '⚡ Update',     value: 'update'     },
@@ -4240,6 +4322,7 @@ Seu cargo de Membro foi liberado. Aproveite todos os canais! 🔱`,
       await interaction.update({
         content: `✅ *Decreto agendado pelos deuses!*
 🆔 **ID:** \`${id}\`
+🇧🇷 **Fuso base:** ${ROTULO_FUSO_ANUNCIO}
 📅 **Dispara:** <t:${dispararTs}:F> *(daqui <t:${dispararTs}:R>)*
 
 Use \`/anuncio cancelar ${id}\` para cancelar.`,
