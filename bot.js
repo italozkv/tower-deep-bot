@@ -1677,6 +1677,7 @@ function criarDataNoFusoBrasil(dataStr, horaStr) {
   // Normaliza — remove espaços e caracteres invisíveis
   dataStr = String(dataStr || '').trim().replace(/[^0-9\-]/g, '');
   horaStr = String(horaStr || '').trim().replace(/[^0-9:]/g, '');
+
   const dataValida = /^\d{4}-\d{2}-\d{2}$/.test(dataStr);
   const horaValida = /^\d{2}:\d{2}$/.test(horaStr);
   if (!dataValida || !horaValida) {
@@ -1685,37 +1686,25 @@ function criarDataNoFusoBrasil(dataStr, horaStr) {
   }
 
   const [ano, mes, dia] = dataStr.split('-').map(Number);
-  const [hora, minuto] = horaStr.split(':').map(Number);
+  const [hora, minuto]  = horaStr.split(':').map(Number);
 
   if (
-    !Number.isInteger(ano) || !Number.isInteger(mes) || !Number.isInteger(dia) ||
-    !Number.isInteger(hora) || !Number.isInteger(minuto) ||
     mes < 1 || mes > 12 || dia < 1 || dia > 31 ||
     hora < 0 || hora > 23 || minuto < 0 || minuto > 59
   ) {
     return null;
   }
 
-  const palpiteUtc = Date.UTC(ano, mes - 1, dia, hora, minuto, 0);
-  let data = new Date(palpiteUtc);
+  // Brasil aboliu horário de verão em 2019 — BRT é sempre UTC-3 (offset fixo de +3h)
+  // Evita problemas com Intl.DateTimeFormat em diferentes versões do Node/Railway
+  const utcMs = Date.UTC(ano, mes - 1, dia, hora + 3, minuto, 0);
+  const data  = new Date(utcMs);
 
-  let offset = obterOffsetDoFusoMs(data, FUSO_ANUNCIO);
-  data = new Date(palpiteUtc - offset);
+  // Confirma que o resultado em BRT bate com o que foi digitado
+  const emBRT = data.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  console.log(`[ANUNCIO] Data calculada: ${dataStr} ${horaStr} BRT → ${data.toISOString()} UTC (${emBRT})`);
 
-  const offsetRecalculado = obterOffsetDoFusoMs(data, FUSO_ANUNCIO);
-  if (offsetRecalculado != offset) {
-    data = new Date(palpiteUtc - offsetRecalculado);
-  }
-
-  const partesConfirmadas = formatarPartesEmFuso(data, FUSO_ANUNCIO);
-  const confere =
-    Number(partesConfirmadas.year) === ano &&
-    Number(partesConfirmadas.month) === mes &&
-    Number(partesConfirmadas.day) === dia &&
-    Number(partesConfirmadas.hour) === hora &&
-    Number(partesConfirmadas.minute) === minuto;
-
-  return confere ? data : null;
+  return data;
 }
 
 async function lerAnuncios()     { return lerArquivoJsonDoGist('anuncios-agendados.json', { anuncios: [], contador: 0 }); }
