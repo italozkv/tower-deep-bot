@@ -1747,11 +1747,41 @@ async function dispararAnuncio(anuncio) {
       return;
     }
 
-    const canal = await client.channels.fetch(canalId).catch(() => null);
-    if (!canal?.isTextBased()) {
-      console.error(`[ANUNCIO] ${anuncio.id} — canal ${canalId} não encontrado. Marcando como falha.`);
+    const canal = await client.channels.fetch(canalId).catch(err => {
+      console.error(`[ANUNCIO] ${anuncio.id} — erro ao buscar canal ${canalId}:`, err.message);
+      return null;
+    });
+
+    if (!canal) {
+      console.error(`[ANUNCIO] ${anuncio.id} — canal ${canalId} retornou null.`);
+      console.error(`[ANUNCIO] Verifique: 1) canal existe no Discord 2) bot tem permissão ViewChannel 3) ID correto no Railway`);
+      // Tenta buscar via cache como fallback
+      const canalCache = client.guilds.cache.first()?.channels.cache.get(canalId);
+      if (canalCache?.isTextBased()) {
+        console.log(`[ANUNCIO] Canal encontrado via cache! Usando fallback.`);
+        const content2 = anuncio.mencionarEveryone ? '@everyone' : undefined;
+        await canalCache.send({ content: content2, embeds: [buildEmbedAnuncio(anuncio)], components: [new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setLabel('🌐 Site Oficial').setURL('https://italozkv.github.io/tower-deep/').setStyle(ButtonStyle.Link),
+          new ButtonBuilder().setLabel('📜 Changelog').setURL('https://italozkv.github.io/tower-deep/changelog.html').setStyle(ButtonStyle.Link),
+        )] });
+        anuncio.status = 'disparado';
+        anuncio.disparadoEm = new Date().toISOString();
+        anunciosAgendados.delete(anuncio.id);
+        await salvarAnuncios();
+        console.log(`📢 Anúncio ${anuncio.id} disparado via cache — "${anuncio.titulo}"`);
+        return;
+      }
       anuncio.status = 'falha';
       anuncio.erro   = `Canal ${canalId} não encontrado`;
+      anunciosAgendados.delete(anuncio.id);
+      await salvarAnuncios();
+      return;
+    }
+
+    if (!canal.isTextBased()) {
+      console.error(`[ANUNCIO] ${anuncio.id} — canal ${canalId} existe mas não é de texto (tipo: ${canal.type})`);
+      anuncio.status = 'falha';
+      anuncio.erro   = `Canal ${canalId} não é de texto`;
       anunciosAgendados.delete(anuncio.id);
       await salvarAnuncios();
       return;
@@ -2429,6 +2459,33 @@ const servidor = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ status: 'online', tokens: tokensAtivos.size, uptime: Math.floor(process.uptime()) }));
+  }
+
+  // Rota de diagnóstico — verifica se os canais configurados existem
+  if (req.method === 'GET' && req.url === '/diagnostico') {
+    const resultado = { online: true, uptime: Math.floor(process.uptime()), canais: {} };
+    const canaisParaVerificar = {
+      CANAL_ANUNCIO_ID: CONFIG.CANAL_ANUNCIO_ID,
+      CANAL_LOG_TICKETS: CONFIG.CANAL_LOG_TICKETS,
+      CANAL_BUGS_ID: CONFIG.CANAL_BUGS_ID,
+      CANAL_UPDATE_ID: CONFIG.CANAL_UPDATE_ID,
+      CANAL_CADASTRO: CONFIG.CANAL_CADASTRO,
+    };
+    for (const [nome, id] of Object.entries(canaisParaVerificar)) {
+      if (!id) { resultado.canais[nome] = { id: null, status: 'NAO_CONFIGURADO' }; continue; }
+      const canal = client.channels.cache.get(id);
+      resultado.canais[nome] = {
+        id,
+        status: canal ? 'OK' : 'NAO_ENCONTRADO_NO_CACHE',
+        tipo: canal?.type ?? null,
+        nome: canal?.name ?? null,
+      };
+    }
+    resultado.anunciosAgendados = [...anunciosAgendados.values()]
+      .filter(a => a.status === 'pendente')
+      .map(a => ({ id: a.id, titulo: a.titulo, dispararEm: a.dispararEm, canalId: a.canalId }));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(resultado, null, 2));
   }
 
   if (req.method === 'GET' && req.url === '/tokens') {
