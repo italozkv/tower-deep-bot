@@ -1724,13 +1724,35 @@ async function salvarAnuncios()  {
 /** Monta o embed final do anúncio */
 function buildEmbedAnuncio(anuncio) {
   const tipo = TIPOS_ANUNCIO[anuncio.tipo] || TIPOS_ANUNCIO.geral;
-  return new EmbedBuilder()
+
+  const embed = new EmbedBuilder()
     .setColor(tipo.cor)
-    .setTitle(`${tipo.emoji} ${anuncio.titulo}`)
-    .setDescription(anuncio.mensagem)
-    .addFields({ name: '🗓️ Agendado por', value: anuncio.agendadoPor, inline: true })
-    .setFooter({ text: `Tower Deep · ${tipo.label}` })
     .setTimestamp();
+
+  // Título (opcional — se vazio não mostra)
+  if (anuncio.titulo && anuncio.titulo.trim()) {
+    embed.setTitle(anuncio.titulo.trim());
+  }
+
+  // Descrição — suporta markdown, emojis, links, negrito etc.
+  if (anuncio.mensagem && anuncio.mensagem.trim()) {
+    embed.setDescription(anuncio.mensagem.trim());
+  }
+
+  // Imagem (opcional)
+  if (anuncio.imagem) {
+    embed.setImage(anuncio.imagem);
+  }
+
+  // Thumbnail (opcional)
+  if (anuncio.thumbnail) {
+    embed.setThumbnail(anuncio.thumbnail);
+  }
+
+  // Footer limpo — só o servidor, sem "Agendado por"
+  embed.setFooter({ text: 'Tower Deep', iconURL: 'https://italozkv.github.io/tower-deep/favicon.ico' });
+
+  return embed;
 }
 
 /** Dispara o anúncio no canal configurado */
@@ -1943,12 +1965,13 @@ async function handleAnuncio(interaction) {
   if (sub === 'agendar') {
     if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫 *Apenas Admins podem agendar anúncios.*', ephemeral: true });
 
-    const titulo    = interaction.options.getString('titulo');
     const mensagem  = interaction.options.getString('mensagem');
-    const dataStr   = interaction.options.getString('data');   // YYYY-MM-DD (Brasília)
-    const horaStr   = interaction.options.getString('hora');   // HH:MM (Brasília)
-    const tipo      = interaction.options.getString('tipo')   || 'geral';
+    const dataStr   = interaction.options.getString('data');
+    const horaStr   = interaction.options.getString('hora');
+    const titulo    = interaction.options.getString('titulo')  || '';
+    const tipo      = interaction.options.getString('tipo')    || 'geral';
     const mencionar = interaction.options.getBoolean('mencionar') ?? true;
+    const imagemUrl = interaction.options.getString('imagem')  || null;
     // ChannelOption retorna o objeto do canal diretamente — ID sempre limpo
     const canalObjeto = interaction.options.getChannel('canal') || null;
     const canalOpt    = canalObjeto?.id || null;
@@ -1977,23 +2000,13 @@ async function handleAnuncio(interaction) {
     const dispararTs = Math.floor(dispararEm.getTime() / 1000);
     const tipoInfo   = TIPOS_ANUNCIO[tipo] || TIPOS_ANUNCIO.geral;
 
-    // Prévia do anúncio
-    const embedPrevia = new EmbedBuilder()
-      .setColor(tipoInfo.cor)
-      .setTitle(`${tipoInfo.emoji} ${titulo}`)
-      .setDescription(mensagem)
-      .addFields(
-        { name: '🗓️ Agendado por',   value: interaction.user.tag,       inline: true },
-        { name: '📋 Tipo',            value: tipoInfo.label,             inline: true },
-        { name: '📢 Canal',           value: canalId ? `<#${canalId}>` : '❌ Não configurado', inline: true },
-        { name: '🇧🇷 Horário base',    value: ROTULO_FUSO_ANUNCIO,       inline: true },
-        { name: '🕒 Horário informado',value: `\`${dataStr} ${horaStr}\``, inline: true },
-        { name: '📅 Dispara em',      value: `<t:${dispararTs}:F>`,      inline: true },
-        { name: '⏰ Relativo',         value: `<t:${dispararTs}:R>`,      inline: true },
-        { name: '🔔 @everyone',       value: mencionar ? 'Sim' : 'Não',  inline: true },
-      )
-      .setFooter({ text: 'Prévia do anúncio — horário de Brasília' })
-      .setTimestamp();
+    // Prévia — mostra exatamente como vai aparecer + info de agendamento
+    const embedPrevia = buildEmbedAnuncio({
+      titulo, mensagem, tipo, imagem: imagemUrl,
+      agendadoPor: interaction.user.tag,
+    });
+    // Adiciona nota de prévia no footer
+    embedPrevia.setFooter({ text: `👁️ PRÉVIA · Dispara <t:${dispararTs}:R> · Canal: ${canalId ? `#${canalId}` : 'padrão'} · @everyone: ${mencionar ? 'Sim' : 'Não'}` });
 
     const id = `ANC-${++anuncioContador}`;
     const botoesPreviw = new ActionRowBuilder().addComponents(
@@ -2008,6 +2021,7 @@ async function handleAnuncio(interaction) {
       agendadoEm: new Date().toISOString(),
       dispararEm: dispararEm.toISOString(),
       mencionarEveryone: mencionar,
+      imagem: imagemUrl,
       status: 'rascunho',
     });
 
@@ -2017,17 +2031,20 @@ async function handleAnuncio(interaction) {
   // ── AGORA (substitui /anunciar) ─────────────────────────────
   if (sub === 'agora') {
     if (!temPermissaoModeracao(interaction)) return interaction.reply({ content: '🚫 *Apenas guardiões podem proclamar decretos.*', ephemeral: true });
-    const titulo    = interaction.options.getString('titulo') || 'Decreto do Olimpo';
     const mensagem  = interaction.options.getString('mensagem');
-    const tipo      = interaction.options.getString('tipo') || 'geral';
+    const titulo    = interaction.options.getString('titulo')   || '';
+    const tipo      = interaction.options.getString('tipo')     || 'geral';
     const mencionar = interaction.options.getBoolean('mencionar') ?? false;
+    const imagemUrl = interaction.options.getString('imagem')   || null;
+    const canalObjAgora = interaction.options.getChannel('canal') || null;
     await interaction.reply({ content: '✅ *Teu decreto foi proclamado!*', ephemeral: true });
-    const embed  = buildEmbedAnuncio({ titulo, mensagem, tipo, agendadoPor: interaction.user.tag });
+    const embed  = buildEmbedAnuncio({ titulo, mensagem, tipo, imagem: imagemUrl, agendadoPor: interaction.user.tag });
     const botoes = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setLabel('🌐 Site Oficial').setURL('https://italozkv.github.io/tower-deep/').setStyle(ButtonStyle.Link),
       new ButtonBuilder().setLabel('📜 Changelog').setURL('https://italozkv.github.io/tower-deep/changelog.html').setStyle(ButtonStyle.Link),
     );
-    await interaction.channel.send({ content: mencionar ? '@everyone' : undefined, embeds: [embed], components: [botoes] });
+    const canalDestino = canalObjAgora || interaction.channel;
+    await canalDestino.send({ content: mencionar ? '@everyone' : undefined, embeds: [embed], components: [botoes] });
     return;
   }
 
@@ -3021,10 +3038,10 @@ const slashCommands = [
     .setDescription('📢 Sistema de anúncios do Olimpo')
     .addSubcommand(sub => sub.setName('agendar')
       .setDescription('📅 Agendar um anúncio para uma data e hora específicas')
-      .addStringOption(opt => opt.setName('titulo').setDescription('Título do anúncio').setRequired(true))
-      .addStringOption(opt => opt.setName('mensagem').setDescription('Conteúdo do anúncio').setRequired(true).setMaxLength(2000))
-      .addStringOption(opt => opt.setName('data').setDescription('Data no formato AAAA-MM-DD no horário de Brasília (ex: 2026-04-15)').setRequired(true))
-      .addStringOption(opt => opt.setName('hora').setDescription('Hora no formato HH:MM no horário de Brasília (ex: 18:00)').setRequired(true))
+      .addStringOption(opt => opt.setName('mensagem').setDescription('Conteúdo do anúncio (suporta **negrito**, emojis, links)').setRequired(true).setMaxLength(2000))
+      .addStringOption(opt => opt.setName('data').setDescription('Data (ex: 2026-04-15)').setRequired(true))
+      .addStringOption(opt => opt.setName('hora').setDescription('Hora em Brasília (ex: 18:00)').setRequired(true))
+      .addStringOption(opt => opt.setName('titulo').setDescription('Título do anúncio (opcional)').setRequired(false).setMaxLength(256))
       .addStringOption(opt => opt.setName('tipo').setDescription('Tipo do anúncio').setRequired(false)
         .addChoices(
           { name: '⚡ Update',     value: 'update'     },
@@ -3033,18 +3050,21 @@ const slashCommands = [
           { name: '📢 Geral',      value: 'geral'      },
           { name: '✨ Divino',     value: 'divino'     },
         ))
+      .addStringOption(opt => opt.setName('imagem').setDescription('URL de imagem para o anúncio (opcional)').setRequired(false))
       .addBooleanOption(opt => opt.setName('mencionar').setDescription('Mencionar @everyone? (padrão: sim)').setRequired(false))
       .addChannelOption(opt => opt.setName('canal').setDescription('Canal destino (padrão: canal de anúncios)').setRequired(false)))
     .addSubcommand(sub => sub.setName('agora')
       .setDescription('📢 Publicar um anúncio imediatamente')
-      .addStringOption(opt => opt.setName('mensagem').setDescription('Conteúdo do anúncio').setRequired(true))
-      .addStringOption(opt => opt.setName('titulo').setDescription('Título do anúncio').setRequired(false))
+      .addStringOption(opt => opt.setName('mensagem').setDescription('Conteúdo do anúncio (suporta **negrito**, emojis, links)').setRequired(true).setMaxLength(2000))
+      .addStringOption(opt => opt.setName('titulo').setDescription('Título do anúncio (opcional)').setRequired(false).setMaxLength(256))
       .addStringOption(opt => opt.setName('tipo').setDescription('Tipo do anúncio').setRequired(false)
         .addChoices(
           { name: '⚡ Update', value: 'update' }, { name: '🎉 Evento', value: 'evento' },
           { name: '🔧 Manutenção', value: 'manutencao' }, { name: '📢 Geral', value: 'geral' }, { name: '✨ Divino', value: 'divino' },
         ))
-      .addBooleanOption(opt => opt.setName('mencionar').setDescription('Mencionar @everyone?').setRequired(false)))
+      .addStringOption(opt => opt.setName('imagem').setDescription('URL de imagem para o anúncio (opcional)').setRequired(false))
+      .addBooleanOption(opt => opt.setName('mencionar').setDescription('Mencionar @everyone?').setRequired(false))
+      .addChannelOption(opt => opt.setName('canal').setDescription('Canal destino (opcional)').setRequired(false)))
     .addSubcommand(sub => sub.setName('listar').setDescription('📋 Ver todos os anúncios agendados'))
     .addSubcommand(sub => sub.setName('cancelar')
       .setDescription('🗑️ Cancelar um anúncio agendado')
