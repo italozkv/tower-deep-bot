@@ -1674,9 +1674,15 @@ function obterOffsetDoFusoMs(date, timeZone = FUSO_ANUNCIO) {
 }
 
 function criarDataNoFusoBrasil(dataStr, horaStr) {
+  // Normaliza — remove espaços e caracteres invisíveis
+  dataStr = String(dataStr || '').trim().replace(/[^0-9\-]/g, '');
+  horaStr = String(horaStr || '').trim().replace(/[^0-9:]/g, '');
   const dataValida = /^\d{4}-\d{2}-\d{2}$/.test(dataStr);
   const horaValida = /^\d{2}:\d{2}$/.test(horaStr);
-  if (!dataValida || !horaValida) return null;
+  if (!dataValida || !horaValida) {
+    console.warn(`[ANUNCIO] Data/hora inválida após normalização: '${dataStr}' '${horaStr}'`);
+    return null;
+  }
 
   const [ano, mes, dia] = dataStr.split('-').map(Number);
   const [hora, minuto] = horaStr.split(':').map(Number);
@@ -1966,8 +1972,9 @@ async function handleAnuncio(interaction) {
     if (!ehAdmin(interaction.member)) return interaction.reply({ content: '🚫 *Apenas Admins podem agendar anúncios.*', ephemeral: true });
 
     const mensagem  = interaction.options.getString('mensagem');
-    const dataStr   = interaction.options.getString('data');
-    const horaStr   = interaction.options.getString('hora');
+    // trim() e normalização removem espaços, pontos e caracteres invisíveis
+    const dataStr   = (interaction.options.getString('data')  || '').trim().replace(/[^0-9\-]/g, '');
+    const horaStr   = (interaction.options.getString('hora')  || '').trim().replace(/[^0-9:]/g, '');
     const titulo    = interaction.options.getString('titulo')  || '';
     const tipo      = interaction.options.getString('tipo')    || 'geral';
     const mencionar = interaction.options.getBoolean('mencionar') ?? true;
@@ -1980,7 +1987,7 @@ async function handleAnuncio(interaction) {
     const dispararEm = criarDataNoFusoBrasil(dataStr, horaStr);
     if (!dispararEm) {
       return interaction.reply({
-        content: '⚠️ *Data ou hora inválida. Use `AAAA-MM-DD` e `HH:MM` no horário de Brasília. Ex.: `2026-04-15` e `18:00`.*',
+        content: `⚠️ *Data ou hora inválida.*\n\nO que foi recebido:\n🗓️ Data: \`${dataStr}\`\n🕐 Hora: \`${horaStr}\`\n\nFormato correto: \`AAAA-MM-DD\` e \`HH:MM\` no horário de Brasília.\nExemplo: \`2026-04-15\` e \`18:00\``,
         ephemeral: true,
       });
     }
