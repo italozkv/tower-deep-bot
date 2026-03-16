@@ -1737,7 +1737,9 @@ function buildEmbedAnuncio(anuncio) {
 async function dispararAnuncio(anuncio) {
   try {
     // ── Valida canal ANTES de alterar qualquer status ──────────
-    const canalId = anuncio.canalId || CONFIG.CANAL_ANUNCIO_ID;
+    // Limpa canalId caso venha com formatação <#ID> do Gist (dados antigos)
+    const canalIdRaw = anuncio.canalId || CONFIG.CANAL_ANUNCIO_ID;
+    const canalId    = canalIdRaw ? String(canalIdRaw).replace(/[^0-9]/g, '') || canalIdRaw : null;
     if (!canalId) {
       console.error(`[ANUNCIO] ${anuncio.id} — canal não configurado. Marcando como falha.`);
       anuncio.status = 'falha';
@@ -1905,6 +1907,8 @@ async function carregarAnuncios() {
 
     for (const anuncio of (dados.anuncios || [])) {
       if (anuncio.status !== 'pendente') { ignorados++; continue; }
+      // Limpa canalId com formatação <#ID> que pode ter vindo de versões antigas
+      if (anuncio.canalId) anuncio.canalId = String(anuncio.canalId).replace(/[^0-9]/g, '') || anuncio.canalId;
 
       const dispararEm  = new Date(anuncio.dispararEm);
       const msRestantes = dispararEm.getTime() - Date.now();
@@ -1945,7 +1949,9 @@ async function handleAnuncio(interaction) {
     const horaStr   = interaction.options.getString('hora');   // HH:MM (Brasília)
     const tipo      = interaction.options.getString('tipo')   || 'geral';
     const mencionar = interaction.options.getBoolean('mencionar') ?? true;
-    const canalOpt  = interaction.options.getString('canal')  || null;
+    // ChannelOption retorna o objeto do canal diretamente — ID sempre limpo
+    const canalObjeto = interaction.options.getChannel('canal') || null;
+    const canalOpt    = canalObjeto?.id || null;
 
     // Parse de data/hora no fuso do Brasil
     const dispararEm = criarDataNoFusoBrasil(dataStr, horaStr);
@@ -3028,7 +3034,7 @@ const slashCommands = [
           { name: '✨ Divino',     value: 'divino'     },
         ))
       .addBooleanOption(opt => opt.setName('mencionar').setDescription('Mencionar @everyone? (padrão: sim)').setRequired(false))
-      .addStringOption(opt => opt.setName('canal').setDescription('ID do canal destino (padrão: canal de anúncios)').setRequired(false)))
+      .addChannelOption(opt => opt.setName('canal').setDescription('Canal destino (padrão: canal de anúncios)').setRequired(false)))
     .addSubcommand(sub => sub.setName('agora')
       .setDescription('📢 Publicar um anúncio imediatamente')
       .addStringOption(opt => opt.setName('mensagem').setDescription('Conteúdo do anúncio').setRequired(true))
