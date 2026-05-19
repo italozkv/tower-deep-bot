@@ -14,6 +14,10 @@ Bot do Discord oficial do projeto **Tower Deep**, focado em comunidade, suporte,
   <img src="https://img.shields.io/badge/Platform-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord">
 </p>
 
+<p align="center">
+  <img width="394" height="698" alt="Preview do Tower Deep Bot" src="https://github.com/user-attachments/assets/de94e81c-3ee7-436f-8833-c22ec83a5988" />
+</p>
+
 O projeto foi feito em **Node.js** com **discord.js v14** e centraliza recursos como:
 
 - changelog e roadmap sincronizados com **GitHub Gist**
